@@ -2291,7 +2291,7 @@ module atm_time_integration
       ! Local variables
       !
       integer :: iCell, k, iq
-      real (kind=RKIND) :: dtseps, c2, qtotal, rcv
+      real (kind=RKIND) :: c2, qtotal, rcv
       real (kind=RKIND), dimension( nVertLevels ) :: b_tri, c_tri
 
       MPAS_ACC_TIMER_START('atm_compute_vert_imp_coefs_work [ACC_data_xfer]')
@@ -2310,16 +2310,13 @@ module atm_time_integration
       end if 
 
       !  set coefficients
-      dtseps = .5*dts*(1.+epssm)
       rcv = rgas/(cp-rgas)
       c2 = cp*rcv
 
       !$acc parallel default(present)
       !$acc loop gang worker
 ! MGD bad to have all threads setting this variable?
-      do k=1,nVertLevels
-         ! WCS_epssm                                                                                                                            
-         ! cofrz(k) = dtseps*rdzw(k)                                                                                                            
+      do k=1,nVertLevels                                                                                                            
          cofrz(k) = rdzw(k)
       end do
       !$acc end parallel
@@ -3083,8 +3080,9 @@ module atm_time_integration
 
 !!!JBK      mod to include extra Rayleigh damping
 
-            rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)              ))/(1.0+dts*(dragrw+dss(k,iCell))) 
-
+!!!         rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)              ))/(1.0+dts*(dragrw+dss(k,iCell))) 
+            rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)+rw_p(k,iCell)))/(1.0+dts*(dragrw+dss(k,iCell))) 
+ 
 !!!JBK
         end do
 
@@ -6840,10 +6838,10 @@ module atm_time_integration
          xtemp = xCell(iCell)
 
 !!!      ttop for flat plane mesh
-         ttop =  ttopb+dttop*sin(pii*(xtemp-xc)/xc + 2.*pii*time_sec*omega_dh)
+!!!         ttop =  ttopb+dttop*sin(pii*(xtemp-xc)/xc + 2.*pii*time_sec*omega_dh)
 
 !!!      ttop for global mesh
-!!!      ttop =  ttopb+dttop*sin(lonCell(iCell) + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
+      ttop =  ttopb+dttop*sin(lonCell(iCell) + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
 !!!      phase_shifted heating on global mesh 
 !!!      ttop =  ttopb+dttop*sin(lonCell(iCell)+pii/6. + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
 
