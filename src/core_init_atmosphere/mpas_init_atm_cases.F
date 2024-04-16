@@ -4023,10 +4023,12 @@ module init_atm_cases
       real (kind=RKIND), dimension(:), pointer   :: latEdge, lonEdge, latVertex, lonVertex
 
       real (kind=RKIND), dimension(nVertLevels, nCells) :: temper, dpdz, plog
+      real (kind=RKIND), dimension(nVertLevels)         :: temp_ref, dpdz_ref   
       real (kind=RKIND), dimension(nCells)              :: pslog, ptop, pitop, ptlog
       real (kind=RKIND)                                 :: zint, ttop, ptopc,  pbot, tanhz, hs, scalar_min, scalar_max
       real (kind=RKIND), parameter                      :: alpha_grid = 0.  ! no grid rotation                  
       real (kind=RKIND), parameter                      :: omega_e = 7.29212e-05
+      real (kind=RKIND)           :: ptop_ref, pitop_ref, pslog_ref
       
       real (kind=RKIND), pointer  :: config_ztop
       logical          , pointer  :: config_hybrid_coordinate
@@ -4509,12 +4511,20 @@ module init_atm_cases
 !!phase_shift                                        *sin(lonCell(i)+pii/6.)*cos(latCell(i))                    
                end if
                                                                                                                                  
-               t    (k,i) = ttopb*exp(gravity*ztemp/(cp*temper(k,i)))
+               t    (k,i)  = ttopb*exp(gravity*ztemp/(cp*temper(k,i)))
 !!!JBK
-               tb(k,i) = t (k,i)
-               
+               tb(k,i)     = t (k,i)               
                relhum(k,i) = 0.
             end do
+         end do
+         
+! Define reference temperature to use in computing ptlogc 
+
+         do k=1,nz1
+            ztemp       = .5*(zw(k)+zw(k+1))
+            ttop        = ttopb
+            tanhz       = tanh((ztemp-zbot)/zsc)
+            temp_ref(k) = ttop  /(ttop/tbot*(1.-tanhz)+tanhz)
          end do
 
 !  set the velocity field - we are on a plane here.
@@ -4533,42 +4543,36 @@ module init_atm_cases
                end do
             end if
          end do
-
 !
-!     reference sounding based on dry atmosphere
-!
-      do i=nCells,1,-1
+!     Reference sounding based on dry atmosphere
+! 
+         pslog_ref = alog(pbot/100000.)
 
-         pslog(i) = alog(pbot/100000.)
+         do k=1,nz1
+            dpdz_ref(k) = - gravity/(rgas*temp_ref(k))
+         end do
 
-        if(i.eq.nCells) then
+         zint  =  pslog_ref + .5*dzw(1)*dpdz_ref(1)
 
-            do k=1,nz1
-               dpdz(k,i) = - gravity/(rgas*temper(k,i)*zz(k,i))
-            end do
+         call mpas_log_write('$r $r $r $r', realArgs=(/zint, -dpdz_ref(1),temp_ref(1),zw(2)/))
 
-            zint  =  pslog(i) + .5*dzw(1)*dpdz(1,i)
+         do k=2,nz1
+            zint = zint + dzu(k)*(fzm(k)*dpdz_ref(k)+fzp(k)*dpdz_ref(k-1))
 
-            call mpas_log_write('$r $r $r $r', realArgs=(/zint, -dpdz(1,i),zgrid(2,i),zz(1,i)/))
+            call mpas_log_write('$i $r $r $r $r', intArgs=(/k/), realArgs=(/zint, -dpdz_ref(k),temp_ref(k),zw(k+1)/))
+         end do
 
-            do k=2,nz1
-               zint = zint + dzu(k)*(fzm(k)*dpdz(k  ,i)+fzp(k)*dpdz(k-1,i))
+         zint      = zint  + .5*dzw(nz1)*dpdz_ref(nz1)
+         ptop_ref  = p0*exp(zint )
+         pitop_ref = (ptop_ref/p0)**rcp
+         ptlogc    = alog(ptop_ref/p0)
+         ptopc     = ptop_ref
 
-            call mpas_log_write('$i $r $r $r $r', intArgs=(/k/), realArgs=(/zint, -dpdz(k,i),zgrid(k+1,i),zz(k,i)/))
+         do i=1,nCells
 
-            end do
-            zint  = zint  + .5*dzw(nz1)*dpdz(nz1,i)
-            ptop  (i) = p0*exp(zint )
-
-            pitop (i) = (ptop (i)/p0)**rcp
-
-            ptlogc = alog(ptop(nCells)/p0)
-            ptopc  = ptop(nCells)
-
-         else
-
-            ptop (i) = ptop (nCells)
-            pitop(i) = pitop(nCells)
+            pslog(i) = alog(pbot/100000.)
+            ptop (i) = ptop_ref
+            pitop(i) = pitop_ref
 
             do k=1,nz1
                dpdz(k,i) = - gravity/(rgas*temper(k,i)*zz(k,i))
@@ -4580,19 +4584,18 @@ module init_atm_cases
             end do
             zint  = zint - .5*dzw(1)*dpdz(1,i)
 
-!            if(diurnal)  then                                                                                                         
-!               pslog(i) = pslog(i) - gravity/(rgas*tbot)*hx(i)                                                                        
-!            else                                                                                                                      
-!!               pslog(i) = zint                                                                                                       
-!            end if                                                                                                                    
-         end if
- 
-      end do
+!              if(diurnal)  then 
+!                 pslog(i) = pslog(i) - gravity/(rgas*tbot)*hx(i) 
+!              else 
+!!                pslog(i) = zint 
+!              end if            
 
-      call mpas_log_write(' ptop(nCells)  = $r ',realArgs=(/.01*ptop(nCells)/))
+         end do
+
+      call mpas_log_write(' ptop_ref  = $r ',realArgs=(/.01*ptop_ref/))
       call mpas_log_write(' ptopc    = $r ',realArgs=(/ptopc/))
+      call mpas_log_write(' pitop_ref = $r $r $r ',realArgs=(/pitop_ref,rgas,cp/))
       call mpas_log_write(' ptlogc   = $r ',realArgs=(/ptlogc/))
-      call mpas_log_write(' pitop(nCells) = $r $r $r ',realArgs=(/pitop(nCells),rgas,cp/))
 
       do i=1,nCells
 
@@ -4627,8 +4630,6 @@ module init_atm_cases
        end do
 
        scalars(index_qv,:,:) = 0.
-
-!!!****************** Mods inserted to here
 
 !-------------------------------------------------------------------
 !     ITERATIONS TO CONVERGE MOIST SOUNDING
