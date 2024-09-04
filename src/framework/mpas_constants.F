@@ -41,9 +41,9 @@ module mpas_constants
 !   real (kind=RKIND), parameter :: rgas    = 287.0_RKIND              !< Constant: Gas constant for dry air [J kg-1 K-1]
    real (kind=RKIND), parameter :: rgas    = 500.0_RKIND              !< Constant: Gas constant for dry air [J kg-1 K-1]
    real (kind=RKIND), parameter :: rv      = 461.6_RKIND              !< Constant: Gas constant for water vapor [J kg-1 K-1]
-!  real (kind=RKIND), parameter :: cp      = 1003.0_RKIND             !< Constant: Specific heat of dry air at constant pressure [J kg-1 K-1]
+!   real (kind=RKIND), parameter :: cp      = 1003.0_RKIND             !< Constant: Specific heat of dry air at constant pressure [J kg-1 K-1]
 !   real (kind=RKIND), parameter :: cp      = 7.0_RKIND*rgas/2.0_RKIND !< Constant: Specific heat of dry air at constant pressure [J kg-1 K-1]
-  real (kind=RKIND), parameter :: cp      = 1300.0_RKIND             !< Constant: Specific heat of dry air at constant pressure [J kg-1 K-1]
+   real (kind=RKIND), parameter :: cp      = 1300.0_RKIND             !< Constant: Specific heat of dry air at constant pressure [J kg-1 K-1]
    real (kind=RKIND), parameter :: rvord   = rv / rgas                !
    real (kind=RKIND), parameter :: cv      = cp - rgas                !< Constant: Specific heat of dry air at constant volume [J kg-1 K-1]
    real (kind=RKIND), parameter :: cvpm    = -cv / cp                 !

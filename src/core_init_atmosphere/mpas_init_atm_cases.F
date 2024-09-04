@@ -2015,7 +2015,7 @@ module init_atm_cases
 
    subroutine init_atm_case_mtn_wave(mesh, nCells, nVertLevels, state, diag, configs)
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   ! Setup mountain wave test case from Schar
+   ! Setup mountain wave test case config_init_case = 6
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
       implicit none
@@ -2313,7 +2313,7 @@ module init_atm_cases
       rcp   = rgas/cp
       rcv   = rgas/(cp-rgas)
 
-      !     metric for  vertical coordinate stretching
+      !     metric for  vertical coordinate stretching                                           
       str = 1.0
       dz = zt/float(nz1)
       call mpas_log_write(' dz = $r', realArgs=(/dz/))
@@ -2441,7 +2441,7 @@ module init_atm_cases
          
          hx(1,iCell) = hm/(1.+((xi-xc)/xa)**2)
          
-!!!         call mpas_log_write('iCell, xi, hx(1,iCell) =$i $r $r', intArgs=(/iCell/), realArgs=(/xi, hx(1,iCell)/))
+         call mpas_log_write('iCell, xi, hx(1,iCell) =$i $r $r', intArgs=(/iCell/), realArgs=(/xi, hx(1,iCell)/))
 
          hx(nz,iCell) = zt
 
@@ -2633,9 +2633,9 @@ module init_atm_cases
 
 !!!JBK Pressure defined at top boundary for const pressure upper boundary based on value at iCell=1
 
-        ptlogc = cp/rgas*alog(pitop)
+        ptlogc = cp/rgas*log(pitop)
 
-        call mpas_log_write(' ptop, ptlogc   = $r $r ',realArgs=(/ptop,ptlogc/))
+        call mpas_log_write(' ptop, ptopb, hx(1,1)   = $r $r $r ',realArgs=(/ptop,ptopb,hx(1,1)/))
 !!!JBK
         do i = 1, nCells
 
@@ -2684,8 +2684,8 @@ module init_atm_cases
 
          do i=1,nCells
 
-            plog_nz1 = (cp/rgas)*alog(pb(nz1  ,i)+p(nz1  ,i))
-            plog_nz2 = (cp/rgas)*alog(pb(nz1-1,i)+p(nz1-1,i))
+            plog_nz1 = (cp/rgas)*log(pb(nz1  ,i)+p(nz1  ,i))
+            plog_nz2 = (cp/rgas)*log(pb(nz1-1,i)+p(nz1-1,i))
 
             hzt (i) = hzt(i)+1.*rgas/gravity*(1.5*plog_nz1 - .5*plog_nz2 - ptlogc)  &
                                *(1.5*p(nz1  ,i)*t(nz1  ,i) - .5*p(nz1-1,i)*t(nz1-1,i))
@@ -3503,7 +3503,7 @@ module init_atm_cases
 !
       do i=nCells,1,-1
 
-         pslog(i) = alog(pbot/100000.)
+         pslog(i) = log(pbot/100000.)
 
         if(i.eq.nCells) then
 
@@ -3526,7 +3526,7 @@ module init_atm_cases
 
             pitop (i) = (ptop (i)/p0)**rcp
 
-            ptlogc = alog(ptop(nCells)/p0)
+            ptlogc = log(ptop(nCells)/p0)
             ptopc  = ptop(nCells)
 
          else
@@ -4262,23 +4262,23 @@ module init_atm_cases
       rcv   = rgas/(cp-rgas)
 
 !!!JBK Parameters for diurnal heating initialization
-      ttopb      = 850.
-      zbot       = 0.
-      dragrw     = .001
-      omega_dh   = 1./86400.
+      ttopb    = 850.
+      zbot     = 0.
+      dragrw   = .001
+      omega_dh = 1./86400.
       if(const_ptop.eq.1)  then
          tbot = 200.
          pbot = 0.03
          zsc  = 50000.
          dttop =  150.
-         dragr = 0.001
+         dragr = .001
          nitr  = 2
       else
          tbot = ttopb
          pbot = p0
          zsc  = 1.
-         dttop = 50. !!! 100.                                                                                                           
-         dragr = 0.003
+         dttop = 75. !  150.
+         dragr = .001
          nitr  = 1
       end if
 !!!JBK                                                                                                                                 
@@ -4286,7 +4286,7 @@ module init_atm_cases
       !     metric for  vertical coordinate stretching
       str = 1.0
       dz = zt/float(nz1)
-      call mpas_log_write(' dz = $r', realArgs=(/dz/))
+      call mpas_log_write(' dz, dttop, dragr = $r $r $r', realArgs=(/dz,dttop,dragr/))
 
        
       kzp = 1        
@@ -4488,12 +4488,16 @@ module init_atm_cases
                if(const_ptop.eq.1)   then
 
 !!!               ttop for 2D diurnal heating                                                                   
-                  ttop        = ttopb + dttop*sin(pii*(xi-xc)/xc)
+!!!               ttop        = ttopb + dttop*sin(pii*(xi-xc)/xc)
 
 !!!               ttop for global diurnal heating                                                               
                   ttop        = ttopb + dttop*sin(lonCell(i))*cos(latCell(i))
 !!phase_shift                  ttop        = ttopb + dttop*sin(lonCell(i)+pii/6.)*cos(latCell(i))               
 
+!!!JBK temp mod to intialize with unform sounding
+!!!                  ttop = ttopb
+!!!
+                  
                   tanhz       = tanh((ztemp-zbot)/zsc)
                   temper(k,i) = ttop  /(ttop/tbot*(1.-tanhz)+tanhz)
 
@@ -4506,7 +4510,7 @@ module init_atm_cases
 !!!                                     temp for 2D diurnal heating                                             
 !!!                                        *sin(pii*(xi-xc)/xc)                                                 
 
-!!!                                     temp for globaldiurnal heating                                          
+!!!                                     temp for global diurnal heating                                          
                                         *sin(lonCell(i))*cos(latCell(i))
 !!phase_shift                                        *sin(lonCell(i)+pii/6.)*cos(latCell(i))                    
                end if
@@ -4546,7 +4550,7 @@ module init_atm_cases
 !
 !     Reference sounding based on dry atmosphere
 ! 
-         pslog_ref = alog(pbot/100000.)
+         pslog_ref = log(pbot/100000.)
 
          do k=1,nz1
             dpdz_ref(k) = - gravity/(rgas*temp_ref(k))
@@ -4565,12 +4569,12 @@ module init_atm_cases
          zint      = zint  + .5*dzw(nz1)*dpdz_ref(nz1)
          ptop_ref  = p0*exp(zint )
          pitop_ref = (ptop_ref/p0)**rcp
-         ptlogc    = alog(ptop_ref/p0)
+         ptlogc    = log(ptop_ref/p0)
          ptopc     = ptop_ref
 
          do i=1,nCells
 
-            pslog(i) = alog(pbot/100000.)
+            pslog(i) = log(pbot/100000.)
             ptop (i) = ptop_ref
             pitop(i) = pitop_ref
 
@@ -4712,6 +4716,10 @@ module init_atm_cases
 
             hzt (i) = hzt(i)+1.*rgas/gravity*(1.5*plog(nz1,i) - .5*plog(nz1-1,i) - ptlogc)  &
                                *(1.5*p(nz1  ,i)*t(nz1  ,i) - .5*p(nz1-1,i)*t(nz1-1,i))
+
+!!!JBK Temp removal of initial hzt variation
+!            hzt(i) = 0.
+!!!
          end do
 
          do iCell=1,nCells
