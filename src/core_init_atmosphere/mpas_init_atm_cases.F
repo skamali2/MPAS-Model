@@ -351,6 +351,50 @@ module init_atm_cases
          !
          call mpas_stream_mgr_reset_alarms(stream_manager, streamID='lbc', direction=MPAS_STREAM_OUTPUT, ierr=ierr)
 
+      else if (config_init_case == 10 ) then                       
+                                                                                                                                              
+         call mpas_log_write(' deep atmosphere test case ')                                                                                     
+         block_ptr => domain % blocklist                                                                                                      
+         do while (associated(block_ptr)) 
+                                                                                                                                              
+            call mpas_pool_get_dimension(block_ptr % dimensions, 'nCells', nCells) 
+            call mpas_pool_get_dimension(block_ptr % dimensions, 'nVertLevels', nVertLevels)
+            
+            call mpas_pool_get_subpool(block_ptr % structs, 'mesh', mesh)
+            call mpas_pool_get_subpool(block_ptr % structs, 'state', state)
+            call mpas_pool_get_subpool(block_ptr % structs, 'diag', diag)
+
+            call mpas_log_write(' calling test case setup ')
+
+            call init_deep_atm_case(mesh, nCells, nVertLevels, state, diag, block_ptr % configs)
+
+            call decouple_variables(mesh, nCells, nVertLevels, state, diag)
+            call mpas_log_write(' returned from test case setup ')
+            block_ptr => block_ptr % next
+         end do
+
+      else if (config_init_case == 11 ) then                       
+                                                                                                                                              
+         call mpas_log_write(' global deep atmosphere test case ')                                                                                     
+         block_ptr => domain % blocklist                                                                                                      
+         do while (associated(block_ptr)) 
+                                                                                                                                              
+            call mpas_pool_get_dimension(block_ptr % dimensions, 'nCells', nCells) 
+            call mpas_pool_get_dimension(block_ptr % dimensions, 'nVertLevels', nVertLevels)
+            
+            call mpas_pool_get_subpool(block_ptr % structs, 'mesh', mesh)
+            call mpas_pool_get_subpool(block_ptr % structs, 'state', state)
+            call mpas_pool_get_subpool(block_ptr % structs, 'diag', diag)
+
+            call mpas_log_write(' calling global test case setup ')
+
+            call init_global_deep_atm_case(mesh, nCells, nVertLevels, state, diag, block_ptr % configs)
+
+            call decouple_variables(mesh, nCells, nVertLevels, state, diag)
+            call mpas_log_write(' returned from global deep test case setup ')
+            block_ptr => block_ptr % next
+         end do
+
       else if (config_init_case == 13 ) then
 
          call mpas_log_write(' CAM-MPAS grid ')
@@ -1971,7 +2015,7 @@ module init_atm_cases
 
    subroutine init_atm_case_mtn_wave(mesh, nCells, nVertLevels, state, diag, configs)
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   ! Setup baroclinic wave test case from Jablonowski and Williamson 2008 (QJRMS)
+   ! Setup mountain wave test case from Schar
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
       implicit none
@@ -1983,17 +2027,20 @@ module init_atm_cases
       type (mpas_pool_type), intent(inout) :: diag
       type (mpas_pool_type), intent(inout) :: configs
 
-      real (kind=RKIND), parameter :: t0=288., hm=250.
+!      real (kind=RKIND), parameter :: t0=288., hm=250.
+      real (kind=RKIND), parameter :: t0=300., hm=700.
 
       real (kind=RKIND), dimension(:), pointer :: rdzw, dzu, rdzu, fzm, fzp
       real (kind=RKIND), dimension(:,:), pointer :: zgrid, zxu, zz, hx, cqw
-      real (kind=RKIND), dimension(:,:), pointer :: ppb, pb, rho_zz, rb, rr, tb, rtb, p, pp, dss, t, rt, u, ru 
+      
+      real (kind=RKIND), dimension(:,:), pointer :: ppb, pb, rho_zz, rb, rr, tb, rtb, p, pp, t, rt, u, ru 
+
       real (kind=RKIND), dimension(:,:,:), pointer :: scalars, deriv_two, zb, zb3
 
       !This is temporary variable here. It just need when calculate tangential velocity v.
       integer :: eoe
       integer, dimension(:), pointer :: nEdgesOnEdge, nEdgesOnCell
-      integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell
+      integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, edgesOnCell
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
 
       integer :: iCell, iCell1, iCell2 , iEdge, ivtx, i, k, nz, itr, cell1, cell2, nz1
@@ -2002,12 +2049,12 @@ module init_atm_cases
 
       real (kind=RKIND) :: ptop, pitop, ptopb, p0, flux, d2fdx2_cell1, d2fdx2_cell2
 
-      real (kind=RKIND) :: ztemp, zd, zt, dz, str
+      real (kind=RKIND) :: ztemp, zt, dz, str
 
       real (kind=RKIND), dimension(nVertLevels, nCells) :: relhum
-      real (kind=RKIND) :: qvs, xnutr
+      real (kind=RKIND) :: qvs
 
-      real (kind=RKIND), dimension(nVertLevels + 1 ) :: zc, zw, ah
+      real (kind=RKIND), dimension(nVertLevels + 1 ) :: ah
       real (kind=RKIND), dimension(nVertLevels ) :: zu, dzw, rdzwp, rdzwm
 
       real (kind=RKIND) :: d1, d2, d3, cof1, cof2
@@ -2038,6 +2085,29 @@ module init_atm_cases
       real (kind=RKIND), dimension(:,:), pointer :: t_init, w, rw, v, rho, theta
       real (kind=RKIND), dimension(:), pointer :: u_init, v_init, angleEdge, fEdge, fVertex
 
+!!!JBK Hybrid coord and const ptop 
+
+      type (field1DReal), pointer                :: hzt_field
+      
+      integer, pointer                           :: kzp, smooth_ztop, ztop_update_interval, const_ptop, hybrid_coordinate
+      real (kind=RKIND), pointer                 :: ptlogc, coefficient_ztop_update, coordinate_transition_bottom_z, hybrid_top_z
+      real (kind=RKIND), dimension(:), pointer   :: hzt, dhztdt, dhztdtm, hztt
+      real (kind=RKIND), dimension(:), pointer   :: zeta_cofw, zw
+      real (kind=RKIND), dimension(:), pointer   :: zeta_coft
+      real (kind=RKIND), dimension(:,:), pointer :: levels_z
+      real (kind=RKIND)                          :: plog_nz1,plog_nz2
+      
+      real (kind=RKIND), pointer  :: config_ztop
+      logical          , pointer  :: config_hybrid_coordinate
+      real (kind=RKIND), pointer  :: config_hybrid_top_z
+      logical          , pointer  :: config_const_ptop
+      real (kind=RKIND), pointer  :: config_coordinate_transition_bottom_z
+      real (kind=RKIND), pointer  :: config_coefficient_ztop_update
+      integer          , pointer  :: config_smooth_ztop
+      integer          , pointer  :: config_ztop_update_interval
+      integer                     :: j, nitr, iitr
+!!!JBK                                                                                                                                                    
+      
       character (len=StrKIND), pointer :: config_interface_projection
 
       call mpas_pool_get_array(mesh, 'xCell', xCell)
@@ -2068,6 +2138,7 @@ module init_atm_cases
 !!!      
       call mpas_pool_get_array(mesh, 'weightsOnEdge', weightsOnEdge)
       call mpas_pool_get_array(mesh, 'nEdgesOnEdge', nEdgesOnEdge)
+      call mpas_pool_get_array(mesh, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(mesh, 'edgesOnEdge', edgesOnEdge)
       call mpas_pool_get_array(mesh, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(mesh, 'nEdgesOnCell', nEdgesOnCell)
@@ -2079,11 +2150,40 @@ module init_atm_cases
       call mpas_pool_get_array(mesh, 'angleEdge', angleEdge)
       call mpas_pool_get_array(mesh, 'fEdge', fEdge)
       call mpas_pool_get_array(mesh, 'fVertex', fVertex)
+!!!JBK Hybrid coordinate and const ptop
 
+      
+      call mpas_pool_get_field(mesh, 'hzt', hzt_field)
+
+      call mpas_pool_get_config(configs, 'config_ztop', config_ztop)
+      call mpas_pool_get_config(configs, 'config_hybrid_coordinate', config_hybrid_coordinate)
+      call mpas_pool_get_config(configs, 'config_hybrid_top_z', config_hybrid_top_z)
+      call mpas_pool_get_config(configs, 'config_const_ptop', config_const_ptop)
+      call mpas_pool_get_config(configs, 'config_coordinate_transition_bottom_z', config_coordinate_transition_bottom_z)
+      call mpas_pool_get_config(configs, 'config_coefficient_ztop_update', config_coefficient_ztop_update)
+      call mpas_pool_get_config(configs, 'config_smooth_ztop', config_smooth_ztop)
+      call mpas_pool_get_config(configs, 'config_ztop_update_interval', config_ztop_update_interval)
+      
+      call mpas_pool_get_array(mesh, 'hybrid_coordinate', hybrid_coordinate)
+      call mpas_pool_get_array(mesh, 'hybrid_top_z', hybrid_top_z)
+      call mpas_pool_get_array(mesh, 'const_ptop', const_ptop)
+      call mpas_pool_get_array(mesh, 'kzp'       , kzp)
+      call mpas_pool_get_array(mesh, 'coordinate_transition_bottom_z', coordinate_transition_bottom_z)
+      call mpas_pool_get_array(mesh, 'coefficient_ztop_update'       , coefficient_ztop_update)
+      call mpas_pool_get_array(mesh, 'smooth_ztop', smooth_ztop)
+      call mpas_pool_get_array(mesh, 'ztop_update_interval', ztop_update_interval)
+      call mpas_pool_get_array(mesh, 'ptlogc'    , ptlogc)
+      call mpas_pool_get_array(mesh, 'hzt'       , hzt)
+      call mpas_pool_get_array(mesh, 'dhztdt'    , dhztdt)
+      call mpas_pool_get_array(mesh, 'dhztdtm'   , dhztdtm)
+      call mpas_pool_get_array(mesh, 'zeta_coft' , zeta_coft)
+      call mpas_pool_get_array(mesh, 'zeta_cofw' , zeta_cofw)
+!!!JBK  
       !
       ! Scale all distances
       !
-      a_scale = 1.0
+!      a_scale = 1.0
+      a_scale = 4.0  ! Scale horizontal grid from 500m to 2km
 
       xCell(:) = xCell(:) * a_scale
       yCell(:) = yCell(:) * a_scale
@@ -2113,6 +2213,7 @@ module init_atm_cases
       call mpas_pool_get_array(mesh, 'zb', zb)
       call mpas_pool_get_array(mesh, 'zb3', zb3)
       call mpas_pool_get_array(mesh, 'rdzw', rdzw)
+      call mpas_pool_get_array(mesh, 'zw', zw)
       call mpas_pool_get_array(mesh, 'dzu', dzu)
       call mpas_pool_get_array(mesh, 'rdzu', rdzu)
       call mpas_pool_get_array(mesh, 'fzm', fzm)
@@ -2120,8 +2221,6 @@ module init_atm_cases
       call mpas_pool_get_array(mesh, 'zxu', zxu)
       call mpas_pool_get_array(mesh, 'zz', zz)
       call mpas_pool_get_array(mesh, 'hx', hx)
-      call mpas_pool_get_array(mesh, 'dss', dss)
-
       call mpas_pool_get_array(mesh, 'cf1', cf1)
       call mpas_pool_get_array(mesh, 'cf2', cf2)
       call mpas_pool_get_array(mesh, 'cf3', cf3)
@@ -2141,7 +2240,9 @@ module init_atm_cases
       call mpas_pool_get_array(diag, 'v', v)
       call mpas_pool_get_array(diag, 'rho', rho)
       call mpas_pool_get_array(diag, 'theta', theta)
-
+!!!const ptop
+      call mpas_pool_get_array(diag, 'levels_z', levels_z)
+!!!
       call mpas_pool_get_array(state, 'rho_zz', rho_zz)
       call mpas_pool_get_array(state, 'theta_m', t)
       call mpas_pool_get_array(state, 'u', u)
@@ -2154,56 +2255,99 @@ module init_atm_cases
 
       call atm_initialize_advection_rk(mesh, nCells, nEdges, maxEdges, on_a_sphere, sphere_radius )
       call atm_initialize_deformation_weights(mesh, nCells, on_a_sphere, sphere_radius)
-!!!JBK
+
+!!!JBK - const ptop and hybrid coordinate         
+
+      zt = config_ztop
+      if(config_const_ptop)  then
+         const_ptop = 1
+         coordinate_transition_bottom_z = config_coordinate_transition_bottom_Z
+         coefficient_ztop_update        = config_coefficient_ztop_update
+         ztop_update_interval           = config_ztop_update_interval
+         smooth_ztop                    = config_smooth_ztop
+         nitr                           = 2
+      else
+         const_ptop                     = 0
+         coordinate_transition_bottom_z = zt
+         coefficient_ztop_update        = 0.
+         ztop_update_interval           = 0
+         smooth_ztop                    = 0
+         nitr                           = 1
+      end if
+
+      call mpas_log_write('Initial const_ptop, smooth_ztop, ztop_update_interval, coefficient_ztop_update $i $i $i $r',  &
+                           intArgs=(/const_ptop,smooth_ztop,ztop_update_interval/), realArgs=(/coefficient_ztop_update/))
+      call mpas_log_write('Coordinate_transition_bottom_z $r',  realArgs=(/coordinate_transition_bottom_z/))
+
+      if(config_hybrid_coordinate)   then
+         hybrid_coordinate = 1
+         hybrid_top_z = config_hybrid_top_z
+      else
+         hybrid_coordinate = 0
+         hybrid_top_z = zt
+         if(const_ptop.eq.1)  then
+            hybrid_coordinate = 1
+            hybrid_top_z = zt/2.
+            call mpas_log_write('***WARNING: A hybrid vertical cordinate must be used if a constant pressure upper boundary is specified')
+         end if
+      end if
+      call mpas_log_write('Initial hybrid_coordinate, hybrid_top_z, zt $i $r $r', intArgs=(/hybrid_coordinate/), realArgs=(/hybrid_top_z,zt/))
+      
+!!!JBK Reference sounding option
+
       if(config_reference_sounding)  then
          reference_sounding_switch = 1
+         if(const_ptop.eq.1)  then
+            reference_sounding_switch = 0
+            call mpas_log_write('***WARNING: A reference sounding for variables can not be used if a constant pressure upper boundary is specified')
+         end if
       else
          reference_sounding_switch = 0
       end if
-!!!      
-      xnutr = 0.1
-      zd = 10500.
 
-      p0 = 1.e+05
-      rcp = rgas/cp
-      rcv = rgas/(cp-rgas)
+      call mpas_log_write('reference_sounding_switch $i', intArgs=(/reference_sounding_switch/))
 
-      ! for hx computation
-      xa = 5000. !SHP - should be changed based on grid distance 
-      xla = 4000.
-      xc = maxval (xCell(:))/2. 
+!!!   JBK
+      
+      p0    = 1.e+05
+      rcp   = rgas/cp
+      rcv   = rgas/(cp-rgas)
 
-      !     metrics for hybrid coordinate and vertical stretching
+      !     metric for  vertical coordinate stretching
       str = 1.0
-      zt = 21000.
       dz = zt/float(nz1)
-!      call mpas_log_write(' dz = $r', realArgs=(/dz/))
+      call mpas_log_write(' dz = $r', realArgs=(/dz/))
 
+       
+      kzp = 1        
       do k=1,nz
 
-!           sh(k) is the stretching specified for height surfaces
+!           str is the stretching specified for height surfaces
 
-            zc(k) = zt*(real(k-1)*dz/zt)**str 
+         zw(k) = zt*(real(k-1)*dz/zt)**str
 
-!           to specify specific heights zc(k) for coordinate surfaces,
-!           input zc(k) 
-!           zw(k) is the hieght of zeta surfaces
-!                zw(k) = (k-1)*dz yields constant dzeta
-!                        and nonconstant dzeta/dz
-!                zw(k) = sh(k)*zt yields nonconstant dzeta
-!                        and nearly constant dzeta/dz 
-
-!            zw(k) = float(k-1)*dz
-            zw(k) = zc(k)
-!
+!           to specify specific heights for coordinate surfaces, input zw(k) 
+!           zw(k) is the nominal height of zeta surfaces
+!                zw(k) = (k-1)*dz yields constant dzeta and nonconstant dzeta/dz
 !           ah(k) governs the transition between terrain-following 
-!           and pureheight coordinates
-!                ah(k) = 0 is a terrain-following coordinate
-!                ah(k) = 1 is a height coordinate
- 
-!            ah(k) = 1.-cos(.5*pii*(k-1)*dz/zt)**6
-            ah(k) = 1.
-!            call mpas_log_write(' k, zc, zw, ah = $i $r $r $r', intArgs=(/k/), realArgs=(/zc(k),zw(k),ah(k)/))
+!           and pure height coordinates
+!              ah(k) = 1 is the basic terrain-following coordinate
+!              ah(k) = 0 is a height coordinate
+            
+!!!   JBK - Hybrid coordinate
+
+            if(zw(k).le.coordinate_transition_bottom_z)    kzp = k    
+            if(hybrid_coordinate.eq.1)  then
+               if(zw(k).lt.hybrid_top_z)   then      
+                  ah(k) = cos(.5*pii*zw(k)/hybrid_top_z)**6
+               else
+                  ah(k) = 0.
+               end if
+            else
+               ah(k) = 1.
+            end if
+            call mpas_log_write(' k, kzp,  zw, ah = $i $i $r $r', intArgs=(/k,kzp/), realArgs=(/zw(k),ah(k)/))
+!!!JBK
       end do
       do k=1,nz1
          dzw (k) = zw(k+1)-zw(k)
@@ -2232,6 +2376,25 @@ module init_atm_cases
         call mpas_log_write('only linear_interpolation or layer_integral supported', messageType=MPAS_LOG_CRIT)
       end if
 
+!!!JBK - const ptop                                                                                                                                                           
+      do k=1,nz1
+         if(k.gt.kzp)  then
+            zeta_coft(k) = ((zu(k)-coordinate_transition_bottom_z)/(zt-coordinate_transition_bottom_z))**2
+            zeta_cofw(k) = ((zw(k)-coordinate_transition_bottom_z)/(zt-coordinate_transition_bottom_z))**2
+         else
+            zeta_coft(k) = 0.
+            zeta_cofw(k) = 0.
+         endif
+      end do
+      zeta_cofw(nz) = 1.
+
+      do iCell=1,nCells
+         hzt    (iCell) = 0.
+         dhztdt (iCell) = 0.
+         dhztdtm(iCell) = 0.
+      end do
+!!!JBK                                                                                                                                                           
+
 !**********  how are we storing cf1, cf2 and cf3?
 
       d1  = .5*dzw(1)
@@ -2247,7 +2410,14 @@ module init_atm_cases
       cf2  = fzm(2) - cof1 - cof2
       cf3  = cof2
 
-! setting for terrain
+! settings for terrain
+
+      xa  = 5000. ! for 500m mesh SHP - should be changed based on grid distance 
+      xla = 4000.      
+       xa  = 2. * 5000. ! xa and xla scaled up for a 2 km horizontal mesh for a bell mtn
+            
+      xc = maxval (xCell(:))/2. 
+
       do iCell=1,nCells
          xi = xCell(iCell)
          !====1. for pure cosine mountain
@@ -2256,16 +2426,22 @@ module init_atm_cases
          ! else
          !    hx(1,iCell) = hm*cos(.5*pii*(xi-xc)/(2.*xa))**2.
          ! end if
-
-         !====2. for cosine mountain
+         !==== 2. for cosine mountain
          !if(abs(xi-xc).lt.xa)  THEN
          !     hx(1,iCell) = hm*cos(pii*(xi-xc)/xla)**2. *cos(.5*pii*(xi-xc)/xa )**2.
          ! else
          !    hx(1,iCell) = 0.
          ! end if
 
-         !====3. for shock mountain 
-         hx(1,iCell) = hm*exp(-((xi-xc)/xa)**2)*cos(pii*(xi-xc)/xla)**2.
+!====3. for schar mountain
+         
+         !hx(1,iCell) = hm*exp(-((xi-xc)/xa)**2)*cos(pii*(xi-xc)/xla)**2.
+
+!==== for bell mountain
+         
+         hx(1,iCell) = hm/(1.+((xi-xc)/xa)**2)
+         
+!!!         call mpas_log_write('iCell, xi, hx(1,iCell) =$i $r $r', intArgs=(/iCell/), realArgs=(/xi, hx(1,iCell)/))
 
          hx(nz,iCell) = zt
 
@@ -2300,33 +2476,35 @@ module init_atm_cases
       do iCell=1,nCells
         do k=1,nz
             if (terrain_smooth) then
-            zgrid(k,iCell) = ah(k)*(zc(k)*(1.-hx(k,iCell)/zt)+hx(k,iCell)) &
-                           + (1.-ah(k)) * zc(k)
+            zgrid(k,iCell) = ah(k)*(zw(k)*(1.-hx(k,iCell)/zt)+hx(k,iCell)) &
+                           + (1.-ah(k)) * zw(k)
             else
-            zgrid(k,iCell) = ah(k)*(zc(k)*(1.-hx(1,iCell)/zt)+hx(1,iCell)) &
-                           + (1.-ah(k)) * zc(k)
+            zgrid(k,iCell) = ah(k)*(zw(k)*(1.-hx(1,iCell)/zt)+hx(1,iCell)) &
+                           + (1.-ah(k)) * zw(k)
             end if
-        end do
+         end do
         do k=1,nz1
           zz (k,iCell) = (zw(k+1)-zw(k))/(zgrid(k+1,iCell)-zgrid(k,iCell))
         end do
-      end do
+     end do
+     
+!!!JBK - Beginning of loop to iterate to initial height of constant pressure ztop                                                                            
 
+     do iitr=1,nitr
+
+        do iCell=1,nCells
+           do k=kzp,nz
+              zgrid(k,iCell) = zeta_cofw(k)*hzt(iCell) + zw(k)
+           end do
+        end do
+
+      levels_z(:,:) = zgrid(:,:)
+!!!JBK
       do i=1, nEdges
         iCell1 = cellsOnEdge(1,i)
         iCell2 = cellsOnEdge(2,i)
         do k=1,nz1
           zxu (k,i) = 0.5 * (zgrid(k,iCell2)-zgrid(k,iCell1) + zgrid(k+1,iCell2)-zgrid(k+1,iCell1)) / dcEdge(i)
-        end do
-      end do
-      do i=1, nCells
-        do k=1,nz1
-          ztemp = .5*(zgrid(k+1,i)+zgrid(k,i))
-          dss(k,i) = 0.
-          ztemp = zgrid(k,i)
-          if(ztemp.gt.zd+.1)  then
-             dss(k,i) = dss(k,i)+xnutr*sin(.5*pii*(ztemp-zd)/(zt-zd))**2
-          end if
         end do
       end do
 
@@ -2341,27 +2519,32 @@ module init_atm_cases
          zinv = 3000.
 
          xn2  = 0.0001
-         xn2m = 0.0000
+         xn2m = 0.0001
          xn2l = 0.0001
 
          vm = 10.
          um = 0.
 
          do k=1,nz1
-           v_init(k) = vm
+!!!           v_init(k) = vm
+           v_init(k) = 40. + 60.*zu(k)/zt
            u_init(k) = um
          end do
 
          do i=1,nCells
             do k=1,nz1
                ztemp   = .5*(zgrid(k,i)+zgrid(k+1,i))
-               tb(k,i) =  t0*(1. + xn2m/gravity*ztemp) 
-               if(ztemp .le. zinv) then
-                  t (k,i) = t0*(1.+xn2l/gravity*ztemp)
-               else
-                  t (k,i) = t0*(1.+xn2l/gravity*zinv+xn2/gravity*(ztemp-zinv)) 
-               end if
-                  relhum(k,i) = 0.
+!               tb(k,i) =  t0*(1. + xn2m/gravity*ztemp) 
+!               if(ztemp .le. zinv) then
+!                  t (k,i) = t0*(1.+xn2l/gravity*ztemp)
+!               else
+!                  t (k,i) = t0*(1.+xn2l/gravity*zinv+xn2/gravity*(ztemp-zinv)) 
+!               end if
+!!!
+               t (k,i) = t0*exp(gravity*ztemp/(cp*t0))
+               tb(k,i) = t (k,i)
+!!!               
+               relhum(k,i) = 0.
             end do
          end do
 
@@ -2374,7 +2557,12 @@ module init_atm_cases
             do k=1,nz1
                ztemp = .25*( zgrid(k,cell1 )+zgrid(k+1,cell1 )  &
                             +zgrid(k,cell2)+zgrid(k+1,cell2))
-               u(k,i) =   vm*sin(angleEdge(i)) + um*cos(angleEdge(i))
+!               u(k,i) =   vm*sin(angleEdge(i)) + um*cos(angleEdge(i))
+!!!
+               u(k,i) = (40. + 60.*ztemp/zt) * sin(angleEdge(i))
+
+!!!                 call mpas_log_write('i, k, ztemp, u(k,i), angleEdge(i) = $i $i $r $r $r', intArgs=(/i,k/), realArgs=(/ztemp,   u(k,i), angleEdge(i)/))
+!!!
             end do
             end if
          end do
@@ -2409,6 +2597,7 @@ module init_atm_cases
 !!!JBK Mods to remove reference state
 !
          if(reference_sounding_switch.eq.0)  then    
+            ptopb = 0.
             do k=1,nz1
                rr (k,i) = rb(k,i)+rr(k,i)
                rb (k,i) = 0.
@@ -2442,6 +2631,12 @@ module init_atm_cases
         pitop = pitop - .5*dzw(nz1)*gravity*(1.+scalars(index_qv,nz1,1))/(cp*t(nz1,1)*zz(nz1,1))
         ptop = p0*pitop**(1./rcp)
 
+!!!JBK Pressure defined at top boundary for const pressure upper boundary based on value at iCell=1
+
+        ptlogc = cp/rgas*alog(pitop)
+
+        call mpas_log_write(' ptop, ptlogc   = $r $r ',realArgs=(/ptop,ptlogc/))
+!!!JBK
         do i = 1, nCells
 
            pp(nz1,i) = ptop-ptopb+.5*dzw(nz1)*gravity*   &
@@ -2463,7 +2658,11 @@ module init_atm_cases
            do k=1,nz1
               temp   = p(k,i)*t(k,i)
               pres   = p0*p(k,i)**(1./rcp)
-              qvs    = 380.*exp(17.27*(temp-273.)/(temp-36.))/pres
+              if(temp.ge.273.)  then
+                 qvs    = 380.*exp( 17.27*(temp-273.)/(temp-36.))/pres
+              else
+                 qvs    = 380.*exp(21.875*(temp-273.)/(temp-7.5))/pres
+              end if   
               scalars(index_qv,k,i) = min(0.014_RKIND,relhum(k,i)*qvs)
            end do
                          
@@ -2478,6 +2677,85 @@ module init_atm_cases
         end do ! loop over cells
 
       end do !  iteration loop
+
+!!!JBK -  Calculation of new height of the constant pressure model top
+
+      if(const_ptop.eq.1)  then
+
+         do i=1,nCells
+
+            plog_nz1 = (cp/rgas)*alog(pb(nz1  ,i)+p(nz1  ,i))
+            plog_nz2 = (cp/rgas)*alog(pb(nz1-1,i)+p(nz1-1,i))
+
+            hzt (i) = hzt(i)+1.*rgas/gravity*(1.5*plog_nz1 - .5*plog_nz2 - ptlogc)  &
+                               *(1.5*p(nz1  ,i)*t(nz1  ,i) - .5*p(nz1-1,i)*t(nz1-1,i))
+         end do
+
+!         do iCell=1,nCells
+!            if(abs(latCell(iCell)).lt..01)  then
+!               call mpas_log_write('$i $i $i $r $r $r $r', intArgs=(/iitr,nCells,iCell/),                  &
+!                      realArgs=(/latCell(iCell),lonCell(iCell),xCell(iCell),hzt(iCell)/))
+!            end if
+!         end do
+
+         if(smooth_ztop.gt.0)  then
+
+            allocate(hztt(nCells+1))
+
+            do i=1,smooth_ztop
+
+               do iCell=1,nCells
+                  hztt (iCell) = hzt(iCell)
+                  hzt  (iCell) = 0.
+               end do
+
+               do iCell=1,nCells
+
+                  do j = 1,nEdgesOnCell(iCell)
+
+                     ! For smoothing at cells along the boundary of the mesh, set the height value                                                         
+                     ! for non-existent neighbors, which map to the "garbage cell", to the same as                                                         
+                     ! the height in the cell being smoothed                                                                                               
+                     if (cellsOnCell(j,iCell) == nCells+1) then
+                        hztt(nCells+1) = hztt(iCell)
+                     end if
+
+                     hzt(iCell) = hzt(iCell) +  dvEdge(edgesOnCell(j,iCell))    &
+                                              / dcEdge(edgesOnCell(j,iCell))    &
+                                               * (hztt(cellsOnCell(j,iCell))-hztt(iCell))
+                  end do
+                  hzt(iCell) = hztt(iCell)  + 0.1875*hzt(iCell)
+               end do
+
+               call mpas_dmpar_exch_halo_field(hzt_field)
+
+            end do
+
+!            do iCell=1,nCells
+!                 if(abs(latCell(iCell)).lt..01)  then
+!                   call mpas_log_write('$i $i $r $r $r $r $r', intArgs=(/iitr,iCell/),                  &
+!                         realArgs=(/latCell(iCell),lonCell(iCell),xCell(iCell),hzt(iCell),hztt(iCell)/))
+!                 end if
+!            end do
+
+            deallocate(hztt)
+         end if
+      end if
+
+      call mpas_log_write(' *** perturbation height of top boundary ***')
+      call mpas_log_write('   Iteration X   HZT       Temp        Pres    ptop')
+
+      do i=100,nCells,100
+          call mpas_log_write('$i $r $r $r $r $r', intArgs=(/iitr/),                  &
+             realArgs=(/xCell(i),hzt(i),t(nz1,i)*p(nz1,i),.01*pp(nz1,i),.01*ptop/))
+      end do
+      
+!!!JBK -  End of loop to iterate to initial height of constant pressure ztop                                                                                  
+
+     end do
+
+!!!JBK                                                                                                                                                     
+!
 !----------------------------------------------------------------------
 !
       call mpas_log_write(' *** sounding for the simulation ***')
@@ -2488,10 +2766,10 @@ module init_atm_cases
                        .01*p0*p(k,1)**(1./rcp),                       &
                        1000.*scalars(index_qv,k,1),                   &
                        (rb(k,1)+rr(k,1))*(1.+scalars(index_qv,k,1)),  &
-                       u_init(k), rr(k,1)/))
+                       v_init(k), rr(k,1)/))
       end do
-
-      do i=1,ncells
+         
+         do i=1,ncells
          do k=1,nz1
             rho_zz(k,i) = rb(k,i)+rr(k,i)
          end do
@@ -2599,6 +2877,9 @@ module init_atm_cases
          end do
       end do
 
+      !                                                                                                                                                    
+      ! Generate rotated Coriolis field would go here
+      !                                                                                                                                                    
 
       do iEdge=1,nEdges
          fEdge(iEdge) = 0.
@@ -2637,6 +2918,2074 @@ module init_atm_cases
 
    end subroutine init_atm_case_mtn_wave
 
+!****************************************************************************************
+
+!                   DEEP ATMOSPHERE TEST CASE
+
+!****************************************************************************************
+
+!------------------------------------------------------------------------------------------
+   subroutine init_deep_atm_case(mesh, nCells, nVertLevels, state, diag, configs)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   ! Setup deep atmosphere test case 10
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+      implicit none
+
+      type (mpas_pool_type), intent(inout) :: mesh
+      integer, intent(in) :: nCells
+      integer, intent(in) :: nVertLevels
+      type (mpas_pool_type), intent(inout) :: state
+      type (mpas_pool_type), intent(inout) :: diag
+      type (mpas_pool_type), intent(inout) :: configs
+
+      real (kind=RKIND), parameter :: t0=300., hm=0.
+
+      real (kind=RKIND), dimension(:), pointer :: rdzw, dzu, rdzu, fzm, fzp
+      real (kind=RKIND), dimension(:,:), pointer :: zgrid, zxu, zz, hx, cqw
+      real (kind=RKIND), dimension(:,:), pointer :: ppb, pb, rho_zz, rb, rr, tb, rtb, p, pp, t, rt, u, ru 
+      real (kind=RKIND), dimension(:,:,:), pointer :: scalars, deriv_two, zb, zb3
+
+      !This is temporary variable here. It just need when calculate tangential velocity v.
+      integer :: eoe
+      integer, dimension(:), pointer :: nEdgesOnEdge, nEdgesOnCell
+      integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, edgesOnCell
+      real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
+
+      integer :: iCell, iCell1, iCell2 , iEdge, ivtx, i, k, nz, itr, cell1, cell2, nz1
+      integer, pointer :: nEdges, maxEdges, nCellsSolve, nVertices
+      integer, pointer :: index_qv
+
+      real (kind=RKIND) :: ptopb, p0, flux, d2fdx2_cell1, d2fdx2_cell2
+
+      real (kind=RKIND) :: ztemp, zt, dz, str
+
+      real (kind=RKIND), dimension(nVertLevels, nCells) :: relhum
+      real (kind=RKIND) :: qvs
+
+      real (kind=RKIND), dimension(nVertLevels + 1 ) :: ah
+      real (kind=RKIND), dimension(nVertLevels ) :: zu, dzw, rdzwp, rdzwm
+
+      real (kind=RKIND) :: d1, d2, d3, cof1, cof2
+      real (kind=RKIND) :: um, vm,rcp, rcv
+      real (kind=RKIND) :: temp, pres, a_scale
+
+      real (kind=RKIND) :: xi, xa, xc, xla, z_edge, z_edge3
+
+      integer, dimension(nCells, 2) :: next_cell
+      logical, parameter :: terrain_smooth = .false.
+!!!JBK reference sounding
+      logical,                         pointer :: config_reference_sounding
+      integer,                         pointer :: reference_sounding_switch
+!!!
+      real (kind=RKIND), dimension(:), pointer :: xCell, yCell, zCell
+      real (kind=RKIND), dimension(:), pointer :: xEdge, yEdge, zEdge
+      real (kind=RKIND), dimension(:), pointer :: xVertex, yVertex, zVertex
+      real (kind=RKIND), dimension(:), pointer :: dcEdge, dvEdge, areaCell, areaTriangle
+      real (kind=RKIND), dimension(:,:), pointer :: kiteAreasOnVertex
+      real (kind=RKIND), pointer :: nominalMinDc
+      logical, pointer :: on_a_sphere
+      real (kind=RKIND), pointer :: sphere_radius
+      real (kind=RKIND), pointer :: config_coef_3rd_order
+      integer, pointer :: config_theta_adv_order
+
+      real (kind=RKIND), pointer :: cf1, cf2, cf3
+
+      real (kind=RKIND), dimension(:,:), pointer :: t_init, w, rw, v, rho, theta
+      real (kind=RKIND), dimension(:), pointer :: u_init, v_init, angleEdge, fEdge, fVertex
+
+!!!JBK Hybrid coord and const ptop 
+
+      type (field1DReal), pointer                :: hzt_field
+      
+      integer, pointer                           :: kzp, smooth_ztop, ztop_update_interval, const_ptop, hybrid_coordinate
+      real (kind=RKIND), pointer                 :: ptlogc, coefficient_ztop_update, coordinate_transition_bottom_z, hybrid_top_z
+      real (kind=RKIND), dimension(:), pointer   :: hzt, dhztdt, dhztdtm, hztt
+      real (kind=RKIND), dimension(:), pointer   :: zeta_cofw, zw
+      real (kind=RKIND), dimension(:), pointer   :: zeta_coft
+      real (kind=RKIND),               pointer   :: time_sec, ttopb, dttop, tbot, zbot, zsc, omega_dh, dragr, dragrw
+      real (kind=RKIND), dimension(:,:), pointer :: levels_z
+
+      real (kind=RKIND), dimension(nVertLevels, nCells) :: temper, dpdz, plog
+      real (kind=RKIND), dimension(nCells)              :: pslog, ptop, pitop, ptlog
+      real (kind=RKIND)                                 :: zint, ttop, ptopc,  pbot, tanhz, hs, scalar_min, scalar_max
+      
+      real (kind=RKIND), pointer  :: config_ztop
+      logical          , pointer  :: config_hybrid_coordinate
+      real (kind=RKIND), pointer  :: config_hybrid_top_z
+      logical          , pointer  :: config_const_ptop
+      real (kind=RKIND), pointer  :: config_coordinate_transition_bottom_z
+      real (kind=RKIND), pointer  :: config_coefficient_ztop_update
+      integer          , pointer  :: config_smooth_ztop
+      integer          , pointer  :: config_ztop_update_interval
+      integer                     :: j, nitr, iitr
+!!!JBK  
+      
+      character (len=StrKIND), pointer :: config_interface_projection
+
+      call mpas_pool_get_array(mesh, 'xCell', xCell)
+      call mpas_pool_get_array(mesh, 'yCell', yCell)
+      call mpas_pool_get_array(mesh, 'zCell', zCell)
+      call mpas_pool_get_array(mesh, 'xEdge', xEdge)
+      call mpas_pool_get_array(mesh, 'yEdge', yEdge)
+      call mpas_pool_get_array(mesh, 'zEdge', zEdge)
+      call mpas_pool_get_array(mesh, 'xVertex', xVertex)
+      call mpas_pool_get_array(mesh, 'yVertex', yVertex)
+      call mpas_pool_get_array(mesh, 'zVertex', zVertex)
+      call mpas_pool_get_array(mesh, 'dvEdge', dvEdge)
+      call mpas_pool_get_array(mesh, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(mesh, 'areaCell', areaCell)
+      call mpas_pool_get_array(mesh, 'areaTriangle', areaTriangle)
+      call mpas_pool_get_array(mesh, 'kiteAreasOnVertex', kiteAreasOnVertex)
+      call mpas_pool_get_array(mesh, 'nominalMinDc', nominalMinDc)
+
+      call mpas_pool_get_config(mesh, 'on_a_sphere', on_a_sphere)
+      call mpas_pool_get_config(mesh, 'sphere_radius', sphere_radius)
+
+      call mpas_pool_get_config(configs, 'config_coef_3rd_order', config_coef_3rd_order)
+      call mpas_pool_get_config(configs, 'config_theta_adv_order', config_theta_adv_order)
+      call mpas_pool_get_config(configs, 'config_interface_projection', config_interface_projection)
+!!!JBK reference sounding switch
+      call mpas_pool_get_config(configs, 'config_reference_sounding', config_reference_sounding)
+      call mpas_pool_get_array(mesh, 'reference_sounding_switch', reference_sounding_switch)
+!!!      
+      call mpas_pool_get_array(mesh, 'weightsOnEdge', weightsOnEdge)
+      call mpas_pool_get_array(mesh, 'nEdgesOnEdge' , nEdgesOnEdge)
+      call mpas_pool_get_array(mesh, 'edgesOnCell'  , edgesOnCell)
+      call mpas_pool_get_array(mesh, 'edgesOnEdge'  , edgesOnEdge)
+      call mpas_pool_get_array(mesh, 'cellsOnEdge'  , cellsOnEdge)
+      call mpas_pool_get_array(mesh, 'nEdgesOnCell' , nEdgesOnCell)
+      call mpas_pool_get_array(mesh, 'cellsOnCell'  , cellsOnCell)
+      call mpas_pool_get_array(mesh, 'deriv_two'    , deriv_two)
+      call mpas_pool_get_array(mesh, 't_init'       , t_init)
+      call mpas_pool_get_array(mesh, 'u_init'       , u_init)
+      call mpas_pool_get_array(mesh, 'v_init'       , v_init)
+      call mpas_pool_get_array(mesh, 'angleEdge'    , angleEdge)
+      call mpas_pool_get_array(mesh, 'fEdge'        , fEdge)
+      call mpas_pool_get_array(mesh, 'fVertex'      , fVertex)
+      
+!!!JBK Hybrid coordinate and const ptop
+      call mpas_pool_get_field(mesh, 'hzt'          , hzt_field)
+
+      call mpas_pool_get_config(configs, 'config_ztop'                          , config_ztop)
+      call mpas_pool_get_config(configs, 'config_hybrid_coordinate'             , config_hybrid_coordinate)
+      call mpas_pool_get_config(configs, 'config_hybrid_top_z'                  , config_hybrid_top_z)
+      call mpas_pool_get_config(configs, 'config_const_ptop'                    , config_const_ptop)
+      call mpas_pool_get_config(configs, 'config_coordinate_transition_bottom_z', config_coordinate_transition_bottom_z)
+      call mpas_pool_get_config(configs, 'config_coefficient_ztop_update'       , config_coefficient_ztop_update)
+      call mpas_pool_get_config(configs, 'config_smooth_ztop'                   , config_smooth_ztop)
+      call mpas_pool_get_config(configs, 'config_ztop_update_interval'          , config_ztop_update_interval)
+      
+      call mpas_pool_get_array(mesh, 'hybrid_coordinate'             , hybrid_coordinate)
+      call mpas_pool_get_array(mesh, 'hybrid_top_z'                  , hybrid_top_z)
+      call mpas_pool_get_array(mesh, 'const_ptop'                    , const_ptop)
+      call mpas_pool_get_array(mesh, 'kzp'                           , kzp)
+      call mpas_pool_get_array(mesh, 'coordinate_transition_bottom_z', coordinate_transition_bottom_z)
+      call mpas_pool_get_array(mesh, 'coefficient_ztop_update'       , coefficient_ztop_update)
+      call mpas_pool_get_array(mesh, 'smooth_ztop'                   , smooth_ztop)
+      call mpas_pool_get_array(mesh, 'ztop_update_interval'          , ztop_update_interval)
+      call mpas_pool_get_array(mesh, 'ptlogc'                        , ptlogc)
+      call mpas_pool_get_array(mesh, 'hzt'                           , hzt)
+      call mpas_pool_get_array(mesh, 'dhztdt'                        , dhztdt)
+      call mpas_pool_get_array(mesh, 'dhztdtm'                       , dhztdtm)
+      call mpas_pool_get_array(mesh, 'zeta_coft'                     , zeta_coft)
+      call mpas_pool_get_array(mesh, 'zeta_cofw'                     , zeta_cofw)
+      call mpas_pool_get_array(mesh, 'time_sec'                      , time_sec)
+      call mpas_pool_get_array(mesh, 'ttopb'                         , ttopb)
+      call mpas_pool_get_array(mesh, 'dttop'                         , dttop)
+      call mpas_pool_get_array(mesh, 'tbot'                          , tbot)
+      call mpas_pool_get_array(mesh, 'zbot'                          , zbot)
+      call mpas_pool_get_array(mesh, 'zsc'                           , zsc)
+      call mpas_pool_get_array(mesh, 'omega_dh'                      , omega_dh)
+      call mpas_pool_get_array(mesh, 'dragr'                         , dragr)
+      call mpas_pool_get_array(mesh, 'dragrw'                        , dragrw)
+!!!JBK  
+      !
+      ! Scale all distances
+      !
+!      a_scale = 1.0
+      a_scale = 200.0  ! Scale horizontal grid from 500m to 100 km
+
+      xCell(:) = xCell(:) * a_scale
+      yCell(:) = yCell(:) * a_scale
+      zCell(:) = zCell(:) * a_scale
+      xVertex(:) = xVertex(:) * a_scale
+      yVertex(:) = yVertex(:) * a_scale
+      zVertex(:) = zVertex(:) * a_scale
+      xEdge(:) = xEdge(:) * a_scale
+      yEdge(:) = yEdge(:) * a_scale
+      zEdge(:) = zEdge(:) * a_scale
+      dvEdge(:) = dvEdge(:) * a_scale
+      dcEdge(:) = dcEdge(:) * a_scale
+      areaCell(:) = areaCell(:) * a_scale**2.0
+      areaTriangle(:) = areaTriangle(:) * a_scale**2.0
+      kiteAreasOnVertex(:,:) = kiteAreasOnVertex(:,:) * a_scale**2.0
+      nominalMinDc = nominalMinDc * a_scale
+
+      
+      call mpas_pool_get_dimension(mesh, 'nEdges'     , nEdges)
+      call mpas_pool_get_dimension(mesh, 'nVertices'  , nVertices)
+      call mpas_pool_get_dimension(mesh, 'nCellsSolve', nCellsSolve)
+      call mpas_pool_get_dimension(mesh, 'maxEdges'   , maxEdges)
+      nz1 = nVertLevels
+      nz = nz1 + 1
+
+      call mpas_pool_get_array(mesh, 'zgrid', zgrid)
+      call mpas_pool_get_array(mesh, 'zb'   , zb)
+      call mpas_pool_get_array(mesh, 'zb3'  , zb3)
+      call mpas_pool_get_array(mesh, 'rdzw' , rdzw)
+      call mpas_pool_get_array(mesh, 'zw'   , zw)
+      call mpas_pool_get_array(mesh, 'dzu'  , dzu)
+      call mpas_pool_get_array(mesh, 'rdzu' , rdzu)
+      call mpas_pool_get_array(mesh, 'fzm'  , fzm)
+      call mpas_pool_get_array(mesh, 'fzp'  , fzp)
+      call mpas_pool_get_array(mesh, 'zxu'  , zxu)
+      call mpas_pool_get_array(mesh, 'zz'   , zz)
+      call mpas_pool_get_array(mesh, 'hx'   , hx)
+      call mpas_pool_get_array(mesh, 'cf1'  , cf1)
+      call mpas_pool_get_array(mesh, 'cf2'  , cf2)
+      call mpas_pool_get_array(mesh, 'cf3'  , cf3)
+
+      call mpas_pool_get_array(diag, 'pressure_base', ppb)
+      call mpas_pool_get_array(diag, 'exner_base'   , pb)
+      call mpas_pool_get_array(diag, 'rho_base'     , rb)
+      call mpas_pool_get_array(diag, 'theta_base'   , tb)
+      call mpas_pool_get_array(diag, 'rtheta_base'  , rtb)
+      call mpas_pool_get_array(diag, 'exner'        , p)
+      call mpas_pool_get_array(diag, 'cqw'          , cqw)
+      call mpas_pool_get_array(diag, 'pressure_p'   , pp)
+      call mpas_pool_get_array(diag, 'rho_p'        , rr)
+      call mpas_pool_get_array(diag, 'rtheta_p'     , rt)
+      call mpas_pool_get_array(diag, 'ru'           , ru)
+      call mpas_pool_get_array(diag, 'rw'           , rw)
+      call mpas_pool_get_array(diag, 'v'            , v)
+      call mpas_pool_get_array(diag, 'rho'          , rho)
+      call mpas_pool_get_array(diag, 'theta'        , theta)
+!!!const ptop
+      call mpas_pool_get_array(diag, 'levels_z'     , levels_z)
+!!!
+      call mpas_pool_get_array(state, 'rho_zz'      , rho_zz)
+      call mpas_pool_get_array(state, 'theta_m'     , t)
+      call mpas_pool_get_array(state, 'u'           , u)
+      call mpas_pool_get_array(state, 'w'           , w)
+      call mpas_pool_get_array(state, 'scalars'     , scalars)
+
+      call mpas_pool_get_dimension(state, 'index_qv', index_qv)
+
+      scalars(:,:,:) = 0.
+
+      call atm_initialize_advection_rk(mesh, nCells, nEdges, maxEdges, on_a_sphere, sphere_radius )
+      call atm_initialize_deformation_weights(mesh, nCells, on_a_sphere, sphere_radius)
+
+!!!JBK - const ptop and hybrid coordinate         
+
+      zt = config_ztop
+      if(config_const_ptop)  then
+         const_ptop                     = 1
+         coordinate_transition_bottom_z = config_coordinate_transition_bottom_Z
+         coefficient_ztop_update        = config_coefficient_ztop_update
+         ztop_update_interval           = config_ztop_update_interval
+         smooth_ztop                    = config_smooth_ztop
+         nitr                           = 2
+      else
+         const_ptop                     = 0
+         coordinate_transition_bottom_z = zt
+         coefficient_ztop_update        = 0.
+         ztop_update_interval           = 0
+         smooth_ztop                    = 0
+         nitr                           = 1
+      end if
+
+      call mpas_log_write('Initial const_ptop, smooth_ztop, ztop_update_interval, coefficient_ztop_update $i $i $i $r',  &
+                           intArgs=(/const_ptop,smooth_ztop,ztop_update_interval/), realArgs=(/coefficient_ztop_update/))
+      call mpas_log_write('Coordinate_transition_bottom_z $r',  realArgs=(/coordinate_transition_bottom_z/))
+
+      if(config_hybrid_coordinate)   then
+         hybrid_coordinate = 1
+         hybrid_top_z = config_hybrid_top_z
+      else
+         hybrid_coordinate = 0
+         hybrid_top_z = zt
+         if(const_ptop.eq.1)  then
+            hybrid_coordinate = 1
+            hybrid_top_z = zt/2.
+            call mpas_log_write('***WARNING: A hybrid vertical cordinate must be used if a constant pressure upper boundary is specified')
+         end if
+      end if
+      call mpas_log_write('Initial hybrid_coordinate, hybrid_top_z, zt $i $r $r', intArgs=(/hybrid_coordinate/), realArgs=(/hybrid_top_z,zt/))
+      
+!!!JBK Reference sounding option
+
+      if(config_reference_sounding)  then
+         reference_sounding_switch = 1
+         if(const_ptop.eq.1)  then
+            reference_sounding_switch = 0
+            call mpas_log_write('***WARNING: A reference sounding for variables can not be used if a constant pressure upper boundary is specified')
+         end if
+      else
+         reference_sounding_switch = 0
+      end if
+
+      call mpas_log_write('reference_sounding_switch $i', intArgs=(/reference_sounding_switch/))
+
+!!!   JBK
+      
+      p0    = 1.e+05
+      rcp   = rgas/cp
+      rcv   = rgas/(cp-rgas)
+
+!!!JBK Parameters for diurnal heating initialization
+      ttopb      = 850.
+      zbot       = 0.
+      dragrw     = .001
+      omega_dh   = 1./86400.
+      if(const_ptop.eq.1)  then
+         tbot = 200.
+         pbot = 0.03
+         zsc  = 50000.
+         dttop =  150.
+         dragr = 0.001
+         nitr  = 2
+      else
+         tbot = ttopb
+         pbot = p0
+         zsc  = 1.
+         dttop =  0 !!! 100.                                                                                                           
+         dragr = 0.003
+         nitr  = 1
+      end if
+!!!JBK                                                                                                                                 
+      
+      !     metric for  vertical coordinate stretching
+      str = 1.0
+      dz = zt/float(nz1)
+      call mpas_log_write(' dz = $r', realArgs=(/dz/))
+
+       
+      kzp = 1        
+      do k=1,nz
+
+!           str is the stretching specified for height surfaces
+
+         zw(k) = zt*(real(k-1)*dz/zt)**str
+
+!           to specify specific heights for coordinate surfaces, input zw(k) 
+!           zw(k) is the nominal height of zeta surfaces
+!                zw(k) = (k-1)*dz yields constant dzeta and nonconstant dzeta/dz
+!           ah(k) governs the transition between terrain-following 
+!           and pure height coordinates
+!              ah(k) = 1 is the basic terrain-following coordinate
+!              ah(k) = 0 is a height coordinate
+            
+!!!   JBK - Hybrid coordinate
+
+            if(zw(k).le.coordinate_transition_bottom_z)    kzp = k    
+            if(hybrid_coordinate.eq.1)  then
+               if(zw(k).lt.hybrid_top_z)   then      
+                  ah(k) = cos(.5*pii*zw(k)/hybrid_top_z)**6
+               else
+                  ah(k) = 0.
+               end if
+            else
+               ah(k) = 1.
+            end if
+            call mpas_log_write(' k, kzp,  zw, ah = $i $i $r $r', intArgs=(/k,kzp/), realArgs=(/zw(k),ah(k)/))
+!!!JBK
+      end do
+      do k=1,nz1
+         dzw (k) = zw(k+1)-zw(k)
+         rdzw(k) = 1./dzw(k)
+         zu(k  ) = .5*(zw(k)+zw(k+1))
+      end do
+      do k=2,nz1
+         dzu (k)  = .5*(dzw(k)+dzw(k-1))
+         rdzu(k)  =  1./dzu(k)
+         rdzwp(k) = dzw(k-1)/(dzw(k  )*(dzw(k)+dzw(k-1)))
+         rdzwm(k) = dzw(k  )/(dzw(k-1)*(dzw(k)+dzw(k-1)))
+      end do
+
+      call mpas_log_write(" interface_projection is " // trim(config_interface_projection))
+      if (trim(config_interface_projection) .eq. "linear_interpolation") then
+        do k=2,nz1
+           fzp (k)  = .5* dzw(k  )/dzu(k)
+           fzm (k)  = .5* dzw(k-1)/dzu(k)
+        end do
+      else if (trim(config_interface_projection) .eq. "layer_integral") then
+        do k=2,nz1
+           fzm (k)  = .5* dzw(k  )/dzu(k)
+           fzp (k)  = .5* dzw(k-1)/dzu(k)
+        end do
+      else
+        call mpas_log_write('only linear_interpolation or layer_integral supported', messageType=MPAS_LOG_CRIT)
+      end if
+
+!!!JBK - const ptop                                                                                                                                                           
+      do k=1,nz1
+         if(k.gt.kzp)  then
+            zeta_coft(k) = ((zu(k)-coordinate_transition_bottom_z)/(zt-coordinate_transition_bottom_z))**2
+            zeta_cofw(k) = ((zw(k)-coordinate_transition_bottom_z)/(zt-coordinate_transition_bottom_z))**2
+         else
+            zeta_coft(k) = 0.
+            zeta_cofw(k) = 0.
+         endif
+      end do
+      zeta_cofw(nz) = 1.
+
+      do iCell=1,nCells
+         hzt    (iCell) = 0.
+         dhztdt (iCell) = 0.
+         dhztdtm(iCell) = 0.
+      end do
+!!!JBK                                                                                                                                                           
+
+!**********  how are we storing cf1, cf2 and cf3?
+
+      d1  = .5*dzw(1)
+      d2  = dzw(1)+.5*dzw(2)
+      d3  = dzw(1)+dzw(2)+.5*dzw(3)
+      !cf1 = d2*d3*(d3-d2)/(d2*d3*(d3-d2)+d1*d3*(d1-d3)+d1*d2*(d2-d1))
+      !cf2 = d1*d3*(d1-d3)/(d2*d3*(d3-d2)+d1*d3*(d1-d3)+d1*d2*(d2-d1))
+      !cf3 = d1*d2*(d2-d1)/(d2*d3*(d3-d2)+d1*d3*(d1-d3)+d1*d2*(d2-d1))
+
+      cof1 = (2.*dzu(2)+dzu(3))/(dzu(2)+dzu(3))*dzw(1)/dzu(2)
+      cof2 =     dzu(2)        /(dzu(2)+dzu(3))*dzw(1)/dzu(3)
+      cf1  = fzp(2) + cof1
+      cf2  = fzm(2) - cof1 - cof2
+      cf3  = cof2
+
+! settings for terrain
+
+      xa  = 5000. ! for 500m mesh SHP - should be changed based on grid distance 
+      xla = 4000.      
+       xa  = 2. * 5000. ! xa and xla scaled up for a 2 km horizontal mesh for a bell mtn
+            
+      xc = maxval (xCell(:))/2. 
+
+      do iCell=1,nCells
+         xi = xCell(iCell)
+
+!==== for bell mountain
+         
+         hx(1,iCell) = hm/(1.+((xi-xc)/xa)**2)
+         
+!!!         call mpas_log_write('iCell, xi, hx(1,iCell) =$i $r $r', intArgs=(/iCell/), realArgs=(/xi, hx(1,iCell)/))
+
+         hx(nz,iCell) = zt
+
+!***** SHP -> get the temporary point information for the neighbor cell ->> should be changed!!!!! 
+         do i=1,nCells 
+            !option 1
+            !IF(yCell(i).eq.yCell(iCell).and.xCell(i).eq.xCell(iCell)-sqrt(3.)*dcEdge(1)) next_cell(iCell,1) = i 
+            !IF(yCell(i).eq.yCell(iCell).and.xCell(i).eq.xCell(iCell)+sqrt(3.)*dcEdge(1)) next_cell(iCell,2) = i 
+            !option 2
+            next_cell(iCell,1) = iCell - 8 ! note ny=4
+            next_cell(iCell,2) = iCell + 8 ! note ny=4
+
+            if (xCell(iCell).le. 3.*dcEdge(1)) then
+                next_cell(iCell,1) = 1
+            else if (xCell(iCell).ge. maxval(xCell(:))-3.*dcEdge(1)) then
+                next_cell(iCell,2) = 1
+            end if
+
+         end do
+      end do
+      
+      call mpas_log_write(' hx computation complete ')
+
+      if (terrain_smooth) then
+         call mpas_log_write('***************************************************************************', messageType=MPAS_LOG_ERR)
+         call mpas_log_write('Please contact the MPAS-A developers for up-to-date terrain-smoothing code.', messageType=MPAS_LOG_ERR)
+         call mpas_log_write('Otherwise, set terrain_smooth=.false. in the mountain wave test case',        messageType=MPAS_LOG_ERR)
+         call mpas_log_write('   initialization routine and re-compile.',                                   messageType=MPAS_LOG_ERR)
+         call mpas_log_write('***************************************************************************', messageType=MPAS_LOG_CRIT)
+      end if
+
+      do iCell=1,nCells
+        do k=1,nz
+            if (terrain_smooth) then
+            zgrid(k,iCell) = ah(k)*(zw(k)*(1.-hx(k,iCell)/zt)+hx(k,iCell)) &
+                           + (1.-ah(k)) * zw(k)
+            else
+            zgrid(k,iCell) = ah(k)*(zw(k)*(1.-hx(1,iCell)/zt)+hx(1,iCell)) &
+                           + (1.-ah(k)) * zw(k)
+            end if
+         end do
+     end do
+     
+!!!JBK - Beginning of loop to iterate to initial height of constant pressure ztop 
+
+     do iitr=1,nitr
+
+        do iCell=1,nCells
+           do k=kzp,nz
+              zgrid(k,iCell) = zeta_cofw(k)*hzt(iCell) + zw(k)
+           end do
+        end do
+
+        levels_z(:,:) = zgrid(:,:)
+
+        do iCell = 1,nCells
+           do k=1,nz1
+             zz (k,iCell) = (zw(k+1)-zw(k))/(zgrid(k+1,iCell)-zgrid(k,iCell))
+           end do
+        end do
+
+!!!JBK
+      do i=1, nEdges
+        iCell1 = cellsOnEdge(1,i)
+        iCell2 = cellsOnEdge(2,i)
+        do k=1,nz1
+          zxu (k,i) = 0.5 * (zgrid(k,iCell2)-zgrid(k,iCell1) + zgrid(k+1,iCell2)-zgrid(k+1,iCell1)) / dcEdge(i)
+        end do
+      end do
+
+      call mpas_log_write(' grid metrics setup complete ')
+!
+! diurnal heating initialization
+!
+         vm = 0.
+         um = 0.
+
+         do k=1,nz1
+           v_init(k) = vm
+           u_init(k) = um
+         end do
+
+         do i=1,nCells
+            xi = xCell(i)
+            do k=1,nz1
+               ztemp   = .5*(zgrid(k,i)+zgrid(k+1,i))
+
+!!! Initial temperature field
+               
+               if(const_ptop.eq.1)   then
+
+                  ttop        = ttopb + dttop*sin(pii*(xi-xc)/xc)
+                  tanhz       = tanh((ztemp-zbot)/zsc)
+                  temper(k,i) = ttop  /(ttop/tbot*(1.-tanhz)+tanhz)
+
+               else
+
+                  hs          = rgas*ttopb/gravity
+                  temper(k,i) = ttopb + dttop*(1.+rcv*zt/hs          &
+                                        *exp(-(zt-zgrid(k,i))/hs))   &
+                                        *sin(pii*(xi-xc)/xc)
+               end if
+                                                                                                                                 
+               t    (k,i) = ttopb*exp(gravity*ztemp/(cp*temper(k,i)))
+!!!JBK
+               tb(k,i) = t (k,i)
+               
+               relhum(k,i) = 0.
+            end do
+         end do
+
+!  set the velocity field - we are on a plane here.
+
+         do i=1, nEdges
+            cell1 = cellsOnEdge(1,i)
+            cell2 = cellsOnEdge(2,i)
+            if(cell1 <= nCellsSolve .or. cell2 <= nCellsSolve) then
+               do k=1,nz1
+                  ztemp = .25*( zgrid(k,cell1 )+zgrid(k+1,cell1 )  &
+                               +zgrid(k,cell2)+zgrid(k+1,cell2))
+                  u(k,i) =   vm*sin(angleEdge(i)) + um*cos(angleEdge(i))
+
+!!!               call mpas_log_write('i, k, ztemp, u(k,i), angleEdge(i) = $i $i $r $r $r', intArgs=(/i,k/), realArgs=(/ztemp,   u(k,i), angleEdge(i)/))
+!!!
+               end do
+            end if
+         end do
+
+!
+!     reference sounding based on dry atmosphere
+!
+      do i=nCells,1,-1
+
+         pslog(i) = alog(pbot/100000.)
+
+        if(i.eq.nCells) then
+
+            do k=1,nz1
+               dpdz(k,i) = - gravity/(rgas*temper(k,i)*zz(k,i))
+            end do
+
+            zint  =  pslog(i) + .5*dzw(1)*dpdz(1,i)
+
+            call mpas_log_write('$r $r $r $r', realArgs=(/zint, -dpdz(1,i),zgrid(2,i),zz(1,i)/))
+
+            do k=2,nz1
+               zint = zint + dzu(k)*(fzm(k)*dpdz(k  ,i)+fzp(k)*dpdz(k-1,i))
+
+            call mpas_log_write('$i $r $r $r $r', intArgs=(/k/), realArgs=(/zint, -dpdz(k,i),zgrid(k+1,i),zz(k,i)/))
+
+            end do
+            zint  = zint  + .5*dzw(nz1)*dpdz(nz1,i)
+            ptop  (i) = p0*exp(zint )
+
+            pitop (i) = (ptop (i)/p0)**rcp
+
+            ptlogc = alog(ptop(nCells)/p0)
+            ptopc  = ptop(nCells)
+
+         else
+
+            ptop (i) = ptop (nCells)
+            pitop(i) = pitop(nCells)
+
+            do k=1,nz1
+               dpdz(k,i) = - gravity/(rgas*temper(k,i)*zz(k,i))
+            end do
+
+            zint  =  ptlogc - .5*dzw(nz1)*dpdz(nz1,i)
+            do k=nz1-1,1,-1
+               zint=zint - dzu(k+1)*(fzm(k+1)*dpdz(k+1,i)+fzp(k+1)*dpdz(k  ,i))
+            end do
+            zint  = zint - .5*dzw(1)*dpdz(1,i)
+
+!            if(diurnal)  then                                                                                                         
+!               pslog(i) = pslog(i) - gravity/(rgas*tbot)*hx(i)                                                                        
+!            else                                                                                                                      
+!!               pslog(i) = zint                                                                                                       
+!            end if                                                                                                                    
+         end if
+ 
+      end do
+
+      call mpas_log_write(' ptop(nCells)  = $r ',realArgs=(/.01*ptop(nCells)/))
+      call mpas_log_write(' ptopc    = $r ',realArgs=(/ptopc/))
+      call mpas_log_write(' ptlogc   = $r ',realArgs=(/ptlogc/))
+      call mpas_log_write(' pitop(nCells) = $r $r $r ',realArgs=(/pitop(nCells),rgas,cp/))
+
+      do i=1,nCells
+
+         zint  =  pslog(i) + .5*dzw(1)*dpdz(1,i)
+         pp (1,i) = p0*exp(zint )
+         do k=2,nz1
+            zint = zint + dzu(k)*(fzm(k)*dpdz(k,i)+fzp(k)*dpdz(k-1,i))
+            pp (k,i) = p0*exp(zint )
+         end do
+
+         do k=1,nz1
+
+            p (k,i) = (pp (k,i)/p0)**rcp
+            t (k,i) = temper(k,i)/p (k,i)
+            rr (k,i) = p (k,i)**((1.-rcp)/rcp)/(rgas/p0*t (k,i)*zz(k,i))
+
+            pb (k,i) = 0.
+            rb (k,i) = 0.
+            rtb(k,i) = 0.
+            cqw(k,i) = 1.
+         end do
+
+      end do
+
+!     End of code for reference sounding       
+
+       call mpas_log_write(' ***** base state sounding ***** ')
+       call mpas_log_write('k       pb        p         rb         rtb         rr          tb          t')
+       do k=1,nVertLevels
+          call mpas_log_write('$i $r $r $r $r $r $r $r', intArgs=(/k/), realArgs=(/pb(k,1),   &
+                                          p(k,1),rb(k,1),rtb(k,1),rr(k,1),tb(k,1),t(k,1)/))
+       end do
+
+       scalars(index_qv,:,:) = 0.
+
+!!!****************** Mods inserted to here
+
+!-------------------------------------------------------------------
+!     ITERATIONS TO CONVERGE MOIST SOUNDING
+
+       do itr=1,30
+
+!!        do i = 1,nCells  
+        do i = nCells,1,-1
+
+            do k=1,nz1
+               dpdz(k,i) = - gravity*rr(k,i)*(1.+scalars(index_qv,k,i))/pp(k,i)  
+            end do
+
+            zint  = pslog(i) + .5*dzw(1)*dpdz(1,i)
+
+            do k=2,nz1
+               zint = zint + dzu(k)*(fzm(k)*dpdz(k  ,i)+fzp(k)*dpdz(k-1,i))       
+            end do
+            zint = zint + .5*dzw(nz1)*dpdz(nz1,i)
+
+            ptlog(i) = zint
+            ptop (i)= p0*exp(zint)
+!
+!!            ptlog(i) = ptlog(1)
+!!            ptop (i) = ptop (1)
+            ptlog(i) = ptlog(nCells)
+            ptop (i) = ptop (nCells)
+!                                                                       
+            if(i.eq.nCells.and.itr.eq.30)  then
+               call mpas_log_write(' ztop = $r ',realArgs=(/.001*zgrid(nz,i)/))
+               call mpas_log_write(' zint = $r ',realArgs=(/zint/))
+               call mpas_log_write(' ptop = $r ',realArgs=(/.01*ptop(i)/))
+            end if
+
+            plog(1,i) = pslog(i) + .5*dzw(1)*dpdz(1,i)
+            pp  (1,i) = p0*exp(plog(1,i))
+
+            do k=2,nz1
+               plog(k,i) = plog(k-1,i) + dzu(k)*(fzm(k)*dpdz(k,i)+fzp(k)*dpdz(k-1,i))
+               pp  (k,i) = p0*exp(plog(k,i))
+            end do
+
+            do k=1,nz1
+               p  (k,i) = (pp(k,i)/p0)**rcp
+               t  (k,i) = temper(k,i)/p(k,i)
+               rr (k,i) = pp (k,i)/(rgas*(1.+1.61*scalars(index_qv,k,i))*temper(k,i)*zz(k,i))
+               rt (k,i) = rr (k,i)*t(k,i)
+            end do
+!
+!     update water vapor mixing ratio from humitidty profile
+!
+           do k=1,nz1
+              temp   = p(k,i)*t(k,i)
+              pres   = p0*p(k,i)**(1./rcp)
+              if(temp.ge.273.)  then
+                 qvs    = 380.*exp( 17.27*(temp-273.)/(temp-36.))/pres
+              else
+                 qvs    = 380.*exp(21.875*(temp-273.)/(temp-7.5))/pres
+              end if   
+              scalars(index_qv,k,i) = min(0.014_RKIND,relhum(k,i)*qvs)
+           end do
+                         
+           do k=1,nz1
+              t (k,i) = t(k,i)*(1.+1.61*scalars(index_qv,k,i))
+           end do
+           do k=2,nz1
+              cqw(k,i) = 1./(1.+.5*( scalars(index_qv,k-1,i)  &
+                                    +scalars(index_qv,k  ,i)))
+           end do
+
+        end do ! loop over cells
+
+      end do !  iteration loop
+
+!!!JBK -  Calculation of new height of the constant pressure model top
+
+      if(const_ptop.eq.1)  then
+
+         do i=1,nCells
+
+            hzt (i) = hzt(i)+1.*rgas/gravity*(1.5*plog(nz1,i) - .5*plog(nz1-1,i) - ptlogc)  &
+                               *(1.5*p(nz1  ,i)*t(nz1  ,i) - .5*p(nz1-1,i)*t(nz1-1,i))
+         end do
+
+!         do iCell=1,nCells
+!            if(abs(latCell(iCell)).lt..01)  then
+!               call mpas_log_write('$i $i $i $r $r $r $r', intArgs=(/iitr,nCells,iCell/),                  &
+!                      realArgs=(/latCell(iCell),lonCell(iCell),xCell(iCell),hzt(iCell)/))
+!            end if
+!         end do
+
+         if(smooth_ztop.gt.0)  then
+
+            allocate(hztt(nCells+1))
+
+            do i=1,smooth_ztop
+
+               do iCell=1,nCells
+                  hztt (iCell) = hzt(iCell)
+                  hzt  (iCell) = 0.
+               end do
+
+               do iCell=1,nCells
+
+                  do j = 1,nEdgesOnCell(iCell)
+
+                     ! For smoothing at cells along the boundary of the mesh, set the height value
+                     ! for non-existent neighbors, which map to the "garbage cell", to the same as
+                     ! the height in the cell being smoothed
+                     
+                     if (cellsOnCell(j,iCell) == nCells+1) then
+                        hztt(nCells+1) = hztt(iCell)
+                     end if
+
+                     hzt(iCell) = hzt(iCell) +  dvEdge(edgesOnCell(j,iCell))    &
+                                              / dcEdge(edgesOnCell(j,iCell))    &
+                                               * (hztt(cellsOnCell(j,iCell))-hztt(iCell))
+                  end do
+                  hzt(iCell) = hztt(iCell)  + 0.1875*hzt(iCell)
+               end do
+
+               call mpas_dmpar_exch_halo_field(hzt_field)
+
+            end do
+
+!            do iCell=1,nCells
+!                 if(abs(latCell(iCell)).lt..01)  then
+!                   call mpas_log_write('$i $i $r $r $r $r $r', intArgs=(/iitr,iCell/),                  &
+!                         realArgs=(/latCell(iCell),lonCell(iCell),xCell(iCell),hzt(iCell),hztt(iCell)/))
+!                 end if
+!            end do
+
+            deallocate(hztt)
+         end if
+      end if
+
+      call mpas_log_write(' *** perturbation height of top boundary ***')
+      call mpas_log_write('   Iteration X   HZT       Temp        Pres    ptop')
+
+      do i=40,nCells,40
+          call mpas_log_write('$i $r $r $r $r $r', intArgs=(/iitr/),                  &
+             realArgs=(/xCell(i),hzt(i),t(nz1,i)*p(nz1,i),.01*pp(nz1,i),.01*ptop/))
+      end do
+      
+!!!JBK -  End of loop to iterate to initial height of constant pressure ztop 
+
+     end do
+
+!!!JBK 
+!
+!----------------------------------------------------------------------
+!
+      call mpas_log_write(' *** sounding for the simulation ***')
+      call mpas_log_write('    Z       Temp        theta       pres         qv       rho_m        u        rr')
+      do k=1,nz1
+
+         call mpas_log_write('$r $r $r $r $r $r $r $r', realArgs=(/.5*(zgrid(k,nCells)+zgrid(k+1,nCells))/1000.,   & 
+                       temper(k,nCells),t(k,nCells)/(1.+1.61*scalars(index_qv,k,nCells)),     & 
+                       .01*p0*p(k,nCells)**(1./rcp),                                          & 
+                       1000.*scalars(index_qv,k,nCells),                                      & 
+                       (rb(k,nCells)+rr(k,nCells))*(1.+scalars(index_qv,k,nCells)),           & 
+                       u_init(k), rr(k,nCells)/))
+      end do
+         
+      do i=1,nCells
+         do k=1,nz1
+            rho_zz(k,i) = rb(k,i)+rr(k,i)
+         end do
+
+        do k=1,nz1
+            t_init(k,i) = t(k,i)
+        end do
+      end do
+
+      do i=1,nEdges
+        cell1 = cellsOnEdge(1,i)
+        cell2 = cellsOnEdge(2,i)
+        if(cell1 <= nCellsSolve .or. cell2 <= nCellsSolve) then
+          do k=1,nz1
+            ru (k,i)  = 0.5*(rho_zz(k,cell1)+rho_zz(k,cell2))*u(k,i)    
+          end do
+        end if
+      end do
+
+!
+!     pre-calculation z-metric terms in omega eqn.
+!
+      do iEdge = 1,nEdges
+         cell1 = cellsOnEdge(1,iEdge)
+         cell2 = cellsOnEdge(2,iEdge)
+         if (cell1 <= nCellsSolve .or. cell2 <= nCellsSolve ) then
+
+            do k = 1, nVertLevels
+
+               if (config_theta_adv_order == 2) then
+
+                  z_edge = (zgrid(k,cell1)+zgrid(k,cell2))/2.
+
+               else !theta_adv_order == 3 or 4 
+
+                  d2fdx2_cell1 = deriv_two(1,1,iEdge) * zgrid(k,cell1)
+                  d2fdx2_cell2 = deriv_two(1,2,iEdge) * zgrid(k,cell2)
+                  do i=1, nEdgesOnCell(cell1)
+                     if ( cellsOnCell(i,cell1) > 0)       &
+                     d2fdx2_cell1 = d2fdx2_cell1 + deriv_two(i+1,1,iEdge) * zgrid(k,cellsOnCell(i,cell1))
+                  end do
+                  do i=1, nEdgesOnCell(cell2)
+                     if ( cellsOnCell(i,cell2) > 0)       &
+                     d2fdx2_cell2 = d2fdx2_cell2 + deriv_two(i+1,2,iEdge) * zgrid(k,cellsOnCell(i,cell2))
+                  end do             
+             
+                  z_edge =  0.5*(zgrid(k,cell1) + zgrid(k,cell2))         &
+                                - (dcEdge(iEdge) **2) * (d2fdx2_cell1 + d2fdx2_cell2) / 12. 
+
+                  if (config_theta_adv_order == 3) then
+                     z_edge3 =  - (dcEdge(iEdge) **2) * (d2fdx2_cell1 - d2fdx2_cell2) / 12.   
+                  else 
+                     z_edge3 = 0.
+                  end if
+
+               end if
+
+                  zb(k,1,iEdge) = (z_edge-zgrid(k,cell1))*dvEdge(iEdge)/areaCell(cell1) 
+                  zb(k,2,iEdge) = (z_edge-zgrid(k,cell2))*dvEdge(iEdge)/areaCell(cell2) 
+                  zb3(k,1,iEdge)=  z_edge3*dvEdge(iEdge)/areaCell(cell1) 
+                  zb3(k,2,iEdge)=  z_edge3*dvEdge(iEdge)/areaCell(cell2) 
+  
+            end do
+
+         end if
+       end do
+
+!     for including terrain
+      w(:,:) = 0.0
+      rw(:,:) = 0.0
+
+!
+!     calculation of omega, rw = zx * ru + zz * rw
+!
+
+      do iEdge = 1,nEdges
+
+         cell1 = cellsOnEdge(1,iEdge)
+         cell2 = cellsOnEdge(2,iEdge)
+
+         if (cell1 <= nCellsSolve .or. cell2 <= nCellsSolve ) then
+         do k = 2, nVertLevels
+            flux =  (fzm(k)*ru(k,iEdge)+fzp(k)*ru(k-1,iEdge))  
+            rw(k,cell2) = rw(k,cell2) + (fzm(k)*zz(k,cell2)+fzp(k)*zz(k-1,cell2))*zb(k,2,iEdge)*flux 
+            rw(k,cell1) = rw(k,cell1) - (fzm(k)*zz(k,cell1)+fzp(k)*zz(k-1,cell1))*zb(k,1,iEdge)*flux 
+
+            if (config_theta_adv_order ==3) then
+               rw(k,cell2) = rw(k,cell2)    &
+                                            - sign(1.0_RKIND,ru(k,iEdge))*config_coef_3rd_order* &
+                                              (fzm(k)*zz(k,cell2)+fzp(k)*zz(k-1,cell2))*zb3(k,2,iEdge)*flux
+               rw(k,cell1) = rw(k,cell1)    &
+                                            + sign(1.0_RKIND,ru(k,iEdge))*config_coef_3rd_order* &
+                                              (fzm(k)*zz(k,cell1)+fzp(k)*zz(k-1,cell1))*zb3(k,1,iEdge)*flux
+            end if
+
+         end do
+         end if
+
+      end do
+
+      ! Compute w from rho_zz and rw
+      do iCell=1,nCells
+         do k=2,nVertLevels
+            w(k,iCell) = rw(k,iCell) / (fzp(k) * rho_zz(k-1,iCell) + fzm(k) * rho_zz(k,iCell))
+         end do
+      end do
+
+      !        
+      ! Generate rotated Coriolis field would go here
+      !          
+
+      do iEdge=1,nEdges
+         fEdge(iEdge) = 0.
+      end do
+
+      do iVtx=1,nVertices
+         fVertex(iVtx) = 0.
+      end do
+
+      !
+      ! Compute mass fluxes tangential to each edge (i.e., through the faces of dual grid cells)
+      !
+      v(:,:) = 0.0
+      do iEdge = 1, nEdges
+         do i=1,nEdgesOnEdge(iEdge)
+            eoe = edgesOnEdge(i,iEdge)
+            if (eoe > 0) then
+               do k = 1, nVertLevels
+                 v(k,iEdge) = v(k,iEdge) + weightsOnEdge(i,iEdge) * u(k, eoe)
+              end do
+            end if
+         end do
+      end do
+
+!      do k=1,nVertLevels
+!        call mpas_log_write(' k,u_init, t_init = $i $r $r $r', intArgs=(/k/), realArgs=(/u_init(k),t_init(k,1)/))
+!      end do
+
+      ! Compute rho and theta from rho_zz and theta_m
+      
+      do iCell=1,nCells
+         do k=1,nVertLevels
+            rho  (k,iCell) = rho_zz(k,iCell) * zz(k,iCell)
+            theta(k,iCell) = t(k,iCell) / (1.0 + 1.61 * scalars(index_qv,k,iCell))
+         end do
+      end do
+
+      !     Temporary diagnostics
+      
+            scalar_min = 100000.0
+            scalar_max = 0.0
+            do iCell = 1, nCells
+               do k = 1, nVertLevels
+                  scalar_min = min(scalar_min, theta(k,iCell)*p(k,iCell))
+	          scalar_max = max(scalar_max, theta(k,iCell)*p(k,iCell))
+               end do
+            end do
+            call mpas_log_write('global min, max T $r $r', realArgs=(/scalar_min, scalar_max/))
+
+            call mpas_log_write('global min, max HZT $r $r', realArgs=(/minval(hzt(:)), maxval(hzt(:))/))
+
+
+            call mpas_log_write(' *** vertical profile at iCell=1 ***')
+            call mpas_log_write(' k   Z       Temp        Pres        U          W ')
+
+            i = 1
+            do k=1,nVertlevels
+               call mpas_log_write('$i $r $r $r', intArgs=(/k/),realArgs=(/zgrid(k,i),theta(k,i)*p(k,i),.01*p0*p(k,i)**(cp/rgas)/))
+            end do
+
+    end subroutine init_deep_atm_case
+
+
+!****************************************************************************************
+
+!                   GLOBAL DEEP ATMOSPHERE TEST CASE
+
+!****************************************************************************************
+
+!------------------------------------------------------------------------------------------
+   subroutine init_global_deep_atm_case(mesh, nCells, nVertLevels, state, diag, configs)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   ! Setup deep atmosphere test case 11
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+      implicit none
+
+      type (mpas_pool_type), intent(inout) :: mesh
+      integer, intent(in) :: nCells
+      integer, intent(in) :: nVertLevels
+      type (mpas_pool_type), intent(inout) :: state
+      type (mpas_pool_type), intent(inout) :: diag
+      type (mpas_pool_type), intent(inout) :: configs
+
+      real (kind=RKIND), parameter :: t0=300., hm=0.
+
+      real (kind=RKIND), dimension(:), pointer :: rdzw, dzu, rdzu, fzm, fzp
+      real (kind=RKIND), dimension(:,:), pointer :: zgrid, zxu, zz, hx, cqw
+      real (kind=RKIND), dimension(:,:), pointer :: ppb, pb, rho_zz, rb, rr, tb, rtb, p, pp, t, rt, u, ru 
+      real (kind=RKIND), dimension(:,:,:), pointer :: scalars, deriv_two, zb, zb3
+
+      !This is temporary variable here. It just need when calculate tangential velocity v.
+      integer :: eoe
+      integer, dimension(:), pointer :: nEdgesOnEdge, nEdgesOnCell
+      integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, edgesOnCell
+      real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
+
+      integer :: iCell, iCell1, iCell2 , iEdge, ivtx, i, k, nz, itr, cell1, cell2, nz1
+      integer, pointer :: nEdges, maxEdges, nCellsSolve, nVertices
+      integer, pointer :: index_qv
+
+      real (kind=RKIND) :: ptopb, p0, flux, d2fdx2_cell1, d2fdx2_cell2
+
+      real (kind=RKIND) :: ztemp, zt, dz, str
+
+      real (kind=RKIND), dimension(nVertLevels, nCells) :: relhum
+      real (kind=RKIND) :: qvs
+
+      real (kind=RKIND), dimension(nVertLevels + 1 ) :: ah
+      real (kind=RKIND), dimension(nVertLevels ) :: zu, dzw, rdzwp, rdzwm
+
+      real (kind=RKIND) :: d1, d2, d3, cof1, cof2
+      real (kind=RKIND) :: um, vm,rcp, rcv
+      real (kind=RKIND) :: temp, pres, a_scale
+
+      real (kind=RKIND) :: xi, xa, xc, xla, z_edge, z_edge3
+
+      integer, dimension(nCells, 2) :: next_cell
+      logical, parameter :: terrain_smooth = .false.
+!!!JBK reference sounding
+      logical,                         pointer :: config_reference_sounding
+      integer,                         pointer :: reference_sounding_switch
+!!!
+      real (kind=RKIND), dimension(:), pointer :: xCell, yCell, zCell
+      real (kind=RKIND), dimension(:), pointer :: xEdge, yEdge, zEdge
+      real (kind=RKIND), dimension(:), pointer :: xVertex, yVertex, zVertex
+      real (kind=RKIND), dimension(:), pointer :: dcEdge, dvEdge, areaCell, areaTriangle
+      real (kind=RKIND), dimension(:,:), pointer :: kiteAreasOnVertex
+      real (kind=RKIND), pointer :: nominalMinDc
+      logical, pointer :: on_a_sphere
+      real (kind=RKIND), pointer :: sphere_radius
+      real (kind=RKIND), pointer :: config_coef_3rd_order
+      integer, pointer :: config_theta_adv_order
+
+      real (kind=RKIND), pointer :: cf1, cf2, cf3
+
+      real (kind=RKIND), dimension(:,:), pointer :: t_init, w, rw, v, rho, theta
+      real (kind=RKIND), dimension(:), pointer :: u_init, v_init, angleEdge, fEdge, fVertex
+
+!!!JBK Hybrid coord and const ptop 
+
+      type (field1DReal), pointer                :: hzt_field
+      
+      integer, pointer                           :: kzp, smooth_ztop, ztop_update_interval, const_ptop, hybrid_coordinate
+      real (kind=RKIND), pointer                 :: ptlogc, coefficient_ztop_update, coordinate_transition_bottom_z, hybrid_top_z
+      real (kind=RKIND), dimension(:), pointer   :: hzt, dhztdt, dhztdtm, hztt
+      real (kind=RKIND), dimension(:), pointer   :: zeta_cofw, zw
+      real (kind=RKIND), dimension(:), pointer   :: zeta_coft
+      real (kind=RKIND),               pointer   :: time_sec, ttopb, dttop, tbot, zbot, zsc, omega_dh, dragr, dragrw
+      real (kind=RKIND), dimension(:,:), pointer :: levels_z
+      real (kind=RKIND), dimension(:), pointer   :: latCell, lonCell
+      real (kind=RKIND), dimension(:), pointer   :: latEdge, lonEdge, latVertex, lonVertex
+
+      real (kind=RKIND), dimension(nVertLevels, nCells) :: temper, dpdz, plog
+      real (kind=RKIND), dimension(nCells)              :: pslog, ptop, pitop, ptlog
+      real (kind=RKIND)                                 :: zint, ttop, ptopc,  pbot, tanhz, hs, scalar_min, scalar_max
+      real (kind=RKIND), parameter                      :: alpha_grid = 0.  ! no grid rotation                  
+      real (kind=RKIND), parameter                      :: omega_e = 7.29212e-05
+      
+      real (kind=RKIND), pointer  :: config_ztop
+      logical          , pointer  :: config_hybrid_coordinate
+      real (kind=RKIND), pointer  :: config_hybrid_top_z
+      logical          , pointer  :: config_const_ptop
+      real (kind=RKIND), pointer  :: config_coordinate_transition_bottom_z
+      real (kind=RKIND), pointer  :: config_coefficient_ztop_update
+      integer          , pointer  :: config_smooth_ztop
+      integer          , pointer  :: config_ztop_update_interval
+      integer                     :: j, nitr, iitr
+!!!JBK  
+      
+      character (len=StrKIND), pointer :: config_interface_projection
+
+      call mpas_pool_get_array(mesh, 'xCell', xCell)
+      call mpas_pool_get_array(mesh, 'yCell', yCell)
+      call mpas_pool_get_array(mesh, 'zCell', zCell)
+      call mpas_pool_get_array(mesh, 'xEdge', xEdge)
+      call mpas_pool_get_array(mesh, 'yEdge', yEdge)
+      call mpas_pool_get_array(mesh, 'zEdge', zEdge)
+      call mpas_pool_get_array(mesh, 'xVertex', xVertex)
+      call mpas_pool_get_array(mesh, 'yVertex', yVertex)
+      call mpas_pool_get_array(mesh, 'zVertex', zVertex)
+      call mpas_pool_get_array(mesh, 'dvEdge', dvEdge)
+      call mpas_pool_get_array(mesh, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(mesh, 'areaCell', areaCell)
+      call mpas_pool_get_array(mesh, 'areaTriangle', areaTriangle)
+      call mpas_pool_get_array(mesh, 'kiteAreasOnVertex', kiteAreasOnVertex)
+      call mpas_pool_get_array(mesh, 'nominalMinDc', nominalMinDc)
+
+      call mpas_pool_get_config(mesh, 'on_a_sphere', on_a_sphere)
+      call mpas_pool_get_config(mesh, 'sphere_radius', sphere_radius)
+
+      call mpas_pool_get_config(configs, 'config_coef_3rd_order', config_coef_3rd_order)
+      call mpas_pool_get_config(configs, 'config_theta_adv_order', config_theta_adv_order)
+      call mpas_pool_get_config(configs, 'config_interface_projection', config_interface_projection)
+!!!JBK reference sounding switch
+      call mpas_pool_get_config(configs, 'config_reference_sounding', config_reference_sounding)
+      call mpas_pool_get_array(mesh, 'reference_sounding_switch', reference_sounding_switch)
+!!!      
+      call mpas_pool_get_array(mesh, 'weightsOnEdge', weightsOnEdge)
+      call mpas_pool_get_array(mesh, 'nEdgesOnEdge' , nEdgesOnEdge)
+      call mpas_pool_get_array(mesh, 'edgesOnCell'  , edgesOnCell)
+      call mpas_pool_get_array(mesh, 'edgesOnEdge'  , edgesOnEdge)
+      call mpas_pool_get_array(mesh, 'cellsOnEdge'  , cellsOnEdge)
+      call mpas_pool_get_array(mesh, 'nEdgesOnCell' , nEdgesOnCell)
+      call mpas_pool_get_array(mesh, 'cellsOnCell'  , cellsOnCell)
+      call mpas_pool_get_array(mesh, 'deriv_two'    , deriv_two)
+      call mpas_pool_get_array(mesh, 't_init'       , t_init)
+      call mpas_pool_get_array(mesh, 'u_init'       , u_init)
+      call mpas_pool_get_array(mesh, 'v_init'       , v_init)
+      call mpas_pool_get_array(mesh, 'angleEdge'    , angleEdge)
+      call mpas_pool_get_array(mesh, 'fEdge'        , fEdge)
+      call mpas_pool_get_array(mesh, 'fVertex'      , fVertex)
+      
+!!!JBK Hybrid coordinate and const ptop
+      call mpas_pool_get_field(mesh, 'hzt'          , hzt_field)
+
+      call mpas_pool_get_config(configs, 'config_ztop'                          , config_ztop)
+      call mpas_pool_get_config(configs, 'config_hybrid_coordinate'             , config_hybrid_coordinate)
+      call mpas_pool_get_config(configs, 'config_hybrid_top_z'                  , config_hybrid_top_z)
+      call mpas_pool_get_config(configs, 'config_const_ptop'                    , config_const_ptop)
+      call mpas_pool_get_config(configs, 'config_coordinate_transition_bottom_z', config_coordinate_transition_bottom_z)
+      call mpas_pool_get_config(configs, 'config_coefficient_ztop_update'       , config_coefficient_ztop_update)
+      call mpas_pool_get_config(configs, 'config_smooth_ztop'                   , config_smooth_ztop)
+      call mpas_pool_get_config(configs, 'config_ztop_update_interval'          , config_ztop_update_interval)
+      
+      call mpas_pool_get_array(mesh, 'hybrid_coordinate'             , hybrid_coordinate)
+      call mpas_pool_get_array(mesh, 'hybrid_top_z'                  , hybrid_top_z)
+      call mpas_pool_get_array(mesh, 'const_ptop'                    , const_ptop)
+      call mpas_pool_get_array(mesh, 'kzp'                           , kzp)
+      call mpas_pool_get_array(mesh, 'coordinate_transition_bottom_z', coordinate_transition_bottom_z)
+      call mpas_pool_get_array(mesh, 'coefficient_ztop_update'       , coefficient_ztop_update)
+      call mpas_pool_get_array(mesh, 'smooth_ztop'                   , smooth_ztop)
+      call mpas_pool_get_array(mesh, 'ztop_update_interval'          , ztop_update_interval)
+      call mpas_pool_get_array(mesh, 'ptlogc'                        , ptlogc)
+      call mpas_pool_get_array(mesh, 'hzt'                           , hzt)
+      call mpas_pool_get_array(mesh, 'dhztdt'                        , dhztdt)
+      call mpas_pool_get_array(mesh, 'dhztdtm'                       , dhztdtm)
+      call mpas_pool_get_array(mesh, 'zeta_coft'                     , zeta_coft)
+      call mpas_pool_get_array(mesh, 'zeta_cofw'                     , zeta_cofw)
+      call mpas_pool_get_array(mesh, 'time_sec'                      , time_sec)
+      call mpas_pool_get_array(mesh, 'ttopb'                         , ttopb)
+      call mpas_pool_get_array(mesh, 'dttop'                         , dttop)
+      call mpas_pool_get_array(mesh, 'tbot'                          , tbot)
+      call mpas_pool_get_array(mesh, 'zbot'                          , zbot)
+      call mpas_pool_get_array(mesh, 'zsc'                           , zsc)
+      call mpas_pool_get_array(mesh, 'omega_dh'                      , omega_dh)
+      call mpas_pool_get_array(mesh, 'dragr'                         , dragr)
+      call mpas_pool_get_array(mesh, 'dragrw'                        , dragrw)
+      call mpas_pool_get_array(mesh, 'latCell'   , latCell)
+      call mpas_pool_get_array(mesh, 'lonCell'   , lonCell)
+      call mpas_pool_get_array(mesh, 'latEdge'   , latEdge)
+      call mpas_pool_get_array(mesh, 'lonEdge'   , lonEdge)
+      call mpas_pool_get_array(mesh, 'latVertex' , latVertex)
+      call mpas_pool_get_array(mesh, 'lonVertex' , lonVertex)
+!!!JBK  
+      !
+      ! Scale all distances
+      !
+!!!      a_scale = 1.0
+!!!      a_scale = 200.0  ! Scale horizontal grid from 500m to 100 km
+      a_scale = sphere_radius
+      
+      xCell(:) = xCell(:) * a_scale
+      yCell(:) = yCell(:) * a_scale
+      zCell(:) = zCell(:) * a_scale
+      xVertex(:) = xVertex(:) * a_scale
+      yVertex(:) = yVertex(:) * a_scale
+      zVertex(:) = zVertex(:) * a_scale
+      xEdge(:) = xEdge(:) * a_scale
+      yEdge(:) = yEdge(:) * a_scale
+      zEdge(:) = zEdge(:) * a_scale
+      dvEdge(:) = dvEdge(:) * a_scale
+      dcEdge(:) = dcEdge(:) * a_scale
+      areaCell(:) = areaCell(:) * a_scale**2.0
+      areaTriangle(:) = areaTriangle(:) * a_scale**2.0
+      kiteAreasOnVertex(:,:) = kiteAreasOnVertex(:,:) * a_scale**2.0
+      nominalMinDc = nominalMinDc * a_scale
+
+      
+      call mpas_pool_get_dimension(mesh, 'nEdges'     , nEdges)
+      call mpas_pool_get_dimension(mesh, 'nVertices'  , nVertices)
+      call mpas_pool_get_dimension(mesh, 'nCellsSolve', nCellsSolve)
+      call mpas_pool_get_dimension(mesh, 'maxEdges'   , maxEdges)
+      nz1 = nVertLevels
+      nz = nz1 + 1
+
+      call mpas_pool_get_array(mesh, 'zgrid', zgrid)
+      call mpas_pool_get_array(mesh, 'zb'   , zb)
+      call mpas_pool_get_array(mesh, 'zb3'  , zb3)
+      call mpas_pool_get_array(mesh, 'rdzw' , rdzw)
+      call mpas_pool_get_array(mesh, 'zw'   , zw)
+      call mpas_pool_get_array(mesh, 'dzu'  , dzu)
+      call mpas_pool_get_array(mesh, 'rdzu' , rdzu)
+      call mpas_pool_get_array(mesh, 'fzm'  , fzm)
+      call mpas_pool_get_array(mesh, 'fzp'  , fzp)
+      call mpas_pool_get_array(mesh, 'zxu'  , zxu)
+      call mpas_pool_get_array(mesh, 'zz'   , zz)
+      call mpas_pool_get_array(mesh, 'hx'   , hx)
+      call mpas_pool_get_array(mesh, 'cf1'  , cf1)
+      call mpas_pool_get_array(mesh, 'cf2'  , cf2)
+      call mpas_pool_get_array(mesh, 'cf3'  , cf3)
+
+      call mpas_pool_get_array(diag, 'pressure_base', ppb)
+      call mpas_pool_get_array(diag, 'exner_base'   , pb)
+      call mpas_pool_get_array(diag, 'rho_base'     , rb)
+      call mpas_pool_get_array(diag, 'theta_base'   , tb)
+      call mpas_pool_get_array(diag, 'rtheta_base'  , rtb)
+      call mpas_pool_get_array(diag, 'exner'        , p)
+      call mpas_pool_get_array(diag, 'cqw'          , cqw)
+      call mpas_pool_get_array(diag, 'pressure_p'   , pp)
+      call mpas_pool_get_array(diag, 'rho_p'        , rr)
+      call mpas_pool_get_array(diag, 'rtheta_p'     , rt)
+      call mpas_pool_get_array(diag, 'ru'           , ru)
+      call mpas_pool_get_array(diag, 'rw'           , rw)
+      call mpas_pool_get_array(diag, 'v'            , v)
+      call mpas_pool_get_array(diag, 'rho'          , rho)
+      call mpas_pool_get_array(diag, 'theta'        , theta)
+!!!const ptop
+      call mpas_pool_get_array(diag, 'levels_z'     , levels_z)
+!!!
+      call mpas_pool_get_array(state, 'rho_zz'      , rho_zz)
+      call mpas_pool_get_array(state, 'theta_m'     , t)
+      call mpas_pool_get_array(state, 'u'           , u)
+      call mpas_pool_get_array(state, 'w'           , w)
+      call mpas_pool_get_array(state, 'scalars'     , scalars)
+
+      call mpas_pool_get_dimension(state, 'index_qv', index_qv)
+
+      scalars(:,:,:) = 0.
+
+      call atm_initialize_advection_rk(mesh, nCells, nEdges, maxEdges, on_a_sphere, sphere_radius )
+      call atm_initialize_deformation_weights(mesh, nCells, on_a_sphere, sphere_radius)
+
+!!!JBK - const ptop and hybrid coordinate         
+
+      zt = config_ztop
+      if(config_const_ptop)  then
+         const_ptop                     = 1
+         coordinate_transition_bottom_z = config_coordinate_transition_bottom_Z
+         coefficient_ztop_update        = config_coefficient_ztop_update
+         ztop_update_interval           = config_ztop_update_interval
+         smooth_ztop                    = config_smooth_ztop
+         nitr                           = 2
+      else
+         const_ptop                     = 0
+         coordinate_transition_bottom_z = zt
+         coefficient_ztop_update        = 0.
+         ztop_update_interval           = 0
+         smooth_ztop                    = 0
+         nitr                           = 1
+      end if
+
+      call mpas_log_write('Initial const_ptop, smooth_ztop, ztop_update_interval, coefficient_ztop_update $i $i $i $r',  &
+                           intArgs=(/const_ptop,smooth_ztop,ztop_update_interval/), realArgs=(/coefficient_ztop_update/))
+      call mpas_log_write('Coordinate_transition_bottom_z $r',  realArgs=(/coordinate_transition_bottom_z/))
+
+      if(config_hybrid_coordinate)   then
+         hybrid_coordinate = 1
+         hybrid_top_z = config_hybrid_top_z
+      else
+         hybrid_coordinate = 0
+         hybrid_top_z = zt
+         if(const_ptop.eq.1)  then
+            hybrid_coordinate = 1
+            hybrid_top_z = zt/2.
+            call mpas_log_write('***WARNING: A hybrid vertical cordinate must be used if a constant pressure upper boundary is specified')
+         end if
+      end if
+      call mpas_log_write('Initial hybrid_coordinate, hybrid_top_z, zt $i $r $r', intArgs=(/hybrid_coordinate/), realArgs=(/hybrid_top_z,zt/))
+      
+!!!JBK Reference sounding option
+
+      if(config_reference_sounding)  then
+         reference_sounding_switch = 1
+         if(const_ptop.eq.1)  then
+            reference_sounding_switch = 0
+            call mpas_log_write('***WARNING: A reference sounding for variables can not be used if a constant pressure upper boundary is specified')
+         end if
+      else
+         reference_sounding_switch = 0
+      end if
+
+      call mpas_log_write('reference_sounding_switch $i', intArgs=(/reference_sounding_switch/))
+
+!!!   JBK
+      
+      p0    = 1.e+05
+      rcp   = rgas/cp
+      rcv   = rgas/(cp-rgas)
+
+!!!JBK Parameters for diurnal heating initialization
+      ttopb      = 850.
+      zbot       = 0.
+      dragrw     = .001
+      omega_dh   = 1./86400.
+      if(const_ptop.eq.1)  then
+         tbot = 200.
+         pbot = 0.03
+         zsc  = 50000.
+         dttop =  150.
+         dragr = 0.001
+         nitr  = 2
+      else
+         tbot = ttopb
+         pbot = p0
+         zsc  = 1.
+         dttop = 50. !!! 100.                                                                                                           
+         dragr = 0.003
+         nitr  = 1
+      end if
+!!!JBK                                                                                                                                 
+      
+      !     metric for  vertical coordinate stretching
+      str = 1.0
+      dz = zt/float(nz1)
+      call mpas_log_write(' dz = $r', realArgs=(/dz/))
+
+       
+      kzp = 1        
+      do k=1,nz
+
+!           str is the stretching specified for height surfaces
+
+         zw(k) = zt*(real(k-1)*dz/zt)**str
+
+!           to specify specific heights for coordinate surfaces, input zw(k) 
+!           zw(k) is the nominal height of zeta surfaces
+!                zw(k) = (k-1)*dz yields constant dzeta and nonconstant dzeta/dz
+!           ah(k) governs the transition between terrain-following 
+!           and pure height coordinates
+!              ah(k) = 1 is the basic terrain-following coordinate
+!              ah(k) = 0 is a height coordinate
+            
+!!!   JBK - Hybrid coordinate
+
+            if(zw(k).le.coordinate_transition_bottom_z)    kzp = k    
+            if(hybrid_coordinate.eq.1)  then
+               if(zw(k).lt.hybrid_top_z)   then      
+                  ah(k) = cos(.5*pii*zw(k)/hybrid_top_z)**6
+               else
+                  ah(k) = 0.
+               end if
+            else
+               ah(k) = 1.
+            end if
+            call mpas_log_write(' k, kzp,  zw, ah = $i $i $r $r', intArgs=(/k,kzp/), realArgs=(/zw(k),ah(k)/))
+!!!JBK
+      end do
+      do k=1,nz1
+         dzw (k) = zw(k+1)-zw(k)
+         rdzw(k) = 1./dzw(k)
+         zu(k  ) = .5*(zw(k)+zw(k+1))
+      end do
+      do k=2,nz1
+         dzu (k)  = .5*(dzw(k)+dzw(k-1))
+         rdzu(k)  =  1./dzu(k)
+         rdzwp(k) = dzw(k-1)/(dzw(k  )*(dzw(k)+dzw(k-1)))
+         rdzwm(k) = dzw(k  )/(dzw(k-1)*(dzw(k)+dzw(k-1)))
+      end do
+
+      call mpas_log_write(" interface_projection is " // trim(config_interface_projection))
+      if (trim(config_interface_projection) .eq. "linear_interpolation") then
+        do k=2,nz1
+           fzp (k)  = .5* dzw(k  )/dzu(k)
+           fzm (k)  = .5* dzw(k-1)/dzu(k)
+        end do
+      else if (trim(config_interface_projection) .eq. "layer_integral") then
+        do k=2,nz1
+           fzm (k)  = .5* dzw(k  )/dzu(k)
+           fzp (k)  = .5* dzw(k-1)/dzu(k)
+        end do
+      else
+        call mpas_log_write('only linear_interpolation or layer_integral supported', messageType=MPAS_LOG_CRIT)
+      end if
+
+!!!JBK - const ptop                                                                                                                                                           
+      do k=1,nz1
+         if(k.gt.kzp)  then
+            zeta_coft(k) = ((zu(k)-coordinate_transition_bottom_z)/(zt-coordinate_transition_bottom_z))**2
+            zeta_cofw(k) = ((zw(k)-coordinate_transition_bottom_z)/(zt-coordinate_transition_bottom_z))**2
+         else
+            zeta_coft(k) = 0.
+            zeta_cofw(k) = 0.
+         endif
+      end do
+      zeta_cofw(nz) = 1.
+
+      do iCell=1,nCells
+         hzt    (iCell) = 0.
+         dhztdt (iCell) = 0.
+         dhztdtm(iCell) = 0.
+      end do
+!!!JBK                                                                                                                                                           
+
+!**********  how are we storing cf1, cf2 and cf3?
+
+      d1  = .5*dzw(1)
+      d2  = dzw(1)+.5*dzw(2)
+      d3  = dzw(1)+dzw(2)+.5*dzw(3)
+      !cf1 = d2*d3*(d3-d2)/(d2*d3*(d3-d2)+d1*d3*(d1-d3)+d1*d2*(d2-d1))
+      !cf2 = d1*d3*(d1-d3)/(d2*d3*(d3-d2)+d1*d3*(d1-d3)+d1*d2*(d2-d1))
+      !cf3 = d1*d2*(d2-d1)/(d2*d3*(d3-d2)+d1*d3*(d1-d3)+d1*d2*(d2-d1))
+
+      cof1 = (2.*dzu(2)+dzu(3))/(dzu(2)+dzu(3))*dzw(1)/dzu(2)
+      cof2 =     dzu(2)        /(dzu(2)+dzu(3))*dzw(1)/dzu(3)
+      cf1  = fzp(2) + cof1
+      cf2  = fzm(2) - cof1 - cof2
+      cf3  = cof2
+
+! settings for terrain
+
+      xa  = 5000. ! for 500m mesh SHP - should be changed based on grid distance 
+      xla = 4000.      
+       xa  = 2. * 5000. ! xa and xla scaled up for a 2 km horizontal mesh for a bell mtn
+            
+      xc = maxval (xCell(:))/2. 
+
+      do iCell=1,nCells
+         xi = xCell(iCell)
+
+!==== for bell mountain
+         
+         hx(1,iCell) = hm/(1.+((xi-xc)/xa)**2)
+         
+!!!         call mpas_log_write('iCell, xi, hx(1,iCell) =$i $r $r', intArgs=(/iCell/), realArgs=(/xi, hx(1,iCell)/))
+
+         hx(nz,iCell) = zt
+
+!***** SHP -> get the temporary point information for the neighbor cell ->> should be changed!!!!! 
+         do i=1,nCells 
+            !option 1
+            !IF(yCell(i).eq.yCell(iCell).and.xCell(i).eq.xCell(iCell)-sqrt(3.)*dcEdge(1)) next_cell(iCell,1) = i 
+            !IF(yCell(i).eq.yCell(iCell).and.xCell(i).eq.xCell(iCell)+sqrt(3.)*dcEdge(1)) next_cell(iCell,2) = i 
+            !option 2
+            next_cell(iCell,1) = iCell - 8 ! note ny=4
+            next_cell(iCell,2) = iCell + 8 ! note ny=4
+
+            if (xCell(iCell).le. 3.*dcEdge(1)) then
+                next_cell(iCell,1) = 1
+            else if (xCell(iCell).ge. maxval(xCell(:))-3.*dcEdge(1)) then
+                next_cell(iCell,2) = 1
+            end if
+
+         end do
+      end do
+      
+      call mpas_log_write(' hx computation complete ')
+
+      if (terrain_smooth) then
+         call mpas_log_write('***************************************************************************', messageType=MPAS_LOG_ERR)
+         call mpas_log_write('Please contact the MPAS-A developers for up-to-date terrain-smoothing code.', messageType=MPAS_LOG_ERR)
+         call mpas_log_write('Otherwise, set terrain_smooth=.false. in the mountain wave test case',        messageType=MPAS_LOG_ERR)
+         call mpas_log_write('   initialization routine and re-compile.',                                   messageType=MPAS_LOG_ERR)
+         call mpas_log_write('***************************************************************************', messageType=MPAS_LOG_CRIT)
+      end if
+
+      do iCell=1,nCells
+        do k=1,nz
+            if (terrain_smooth) then
+            zgrid(k,iCell) = ah(k)*(zw(k)*(1.-hx(k,iCell)/zt)+hx(k,iCell)) &
+                           + (1.-ah(k)) * zw(k)
+            else
+            zgrid(k,iCell) = ah(k)*(zw(k)*(1.-hx(1,iCell)/zt)+hx(1,iCell)) &
+                           + (1.-ah(k)) * zw(k)
+            end if
+         end do
+     end do
+     
+!!!JBK - Beginning of loop to iterate to initial height of constant pressure ztop 
+
+     do iitr=1,nitr
+
+        do iCell=1,nCells
+           do k=kzp,nz
+              zgrid(k,iCell) = zeta_cofw(k)*hzt(iCell) + zw(k)
+           end do
+        end do
+
+        levels_z(:,:) = zgrid(:,:)
+
+        do iCell = 1,nCells
+           do k=1,nz1
+             zz (k,iCell) = (zw(k+1)-zw(k))/(zgrid(k+1,iCell)-zgrid(k,iCell))
+           end do
+        end do
+
+!!!JBK
+      do i=1, nEdges
+        iCell1 = cellsOnEdge(1,i)
+        iCell2 = cellsOnEdge(2,i)
+        do k=1,nz1
+          zxu (k,i) = 0.5 * (zgrid(k,iCell2)-zgrid(k,iCell1) + zgrid(k+1,iCell2)-zgrid(k+1,iCell1)) / dcEdge(i)
+        end do
+      end do
+
+      call mpas_log_write(' grid metrics setup complete ')
+!
+! diurnal heating initialization
+!
+         vm = 0.
+         um = 0.
+
+         do k=1,nz1
+           v_init(k) = vm
+           u_init(k) = um
+         end do
+
+         do i=1,nCells
+            xi = xCell(i)
+            do k=1,nz1
+               ztemp   = .5*(zgrid(k,i)+zgrid(k+1,i))
+
+!!! Initial temperature field
+               
+               if(const_ptop.eq.1)   then
+
+!!!               ttop for 2D diurnal heating                                                                   
+                  ttop        = ttopb + dttop*sin(pii*(xi-xc)/xc)
+
+!!!               ttop for global diurnal heating                                                               
+                  ttop        = ttopb + dttop*sin(lonCell(i))*cos(latCell(i))
+!!phase_shift                  ttop        = ttopb + dttop*sin(lonCell(i)+pii/6.)*cos(latCell(i))               
+
+                  tanhz       = tanh((ztemp-zbot)/zsc)
+                  temper(k,i) = ttop  /(ttop/tbot*(1.-tanhz)+tanhz)
+
+               else
+
+                  hs          = rgas*ttopb/gravity
+                  temper(k,i) = ttopb + dttop*(1.+rcv*zt/hs          &
+                                        *exp(-(zt-zgrid(k,i))/hs))   &
+
+!!!                                     temp for 2D diurnal heating                                             
+!!!                                        *sin(pii*(xi-xc)/xc)                                                 
+
+!!!                                     temp for globaldiurnal heating                                          
+                                        *sin(lonCell(i))*cos(latCell(i))
+!!phase_shift                                        *sin(lonCell(i)+pii/6.)*cos(latCell(i))                    
+               end if
+                                                                                                                                 
+               t    (k,i) = ttopb*exp(gravity*ztemp/(cp*temper(k,i)))
+!!!JBK
+               tb(k,i) = t (k,i)
+               
+               relhum(k,i) = 0.
+            end do
+         end do
+
+!  set the velocity field - we are on a plane here.
+
+         do i=1, nEdges
+            cell1 = cellsOnEdge(1,i)
+            cell2 = cellsOnEdge(2,i)
+            if(cell1 <= nCellsSolve .or. cell2 <= nCellsSolve) then
+               do k=1,nz1
+                  ztemp = .25*( zgrid(k,cell1 )+zgrid(k+1,cell1 )  &
+                               +zgrid(k,cell2)+zgrid(k+1,cell2))
+                  u(k,i) =   vm*sin(angleEdge(i)) + um*cos(angleEdge(i))
+
+!!!               call mpas_log_write('i, k, ztemp, u(k,i), angleEdge(i) = $i $i $r $r $r', intArgs=(/i,k/), realArgs=(/ztemp,   u(k,i), angleEdge(i)/))
+!!!
+               end do
+            end if
+         end do
+
+!
+!     reference sounding based on dry atmosphere
+!
+      do i=nCells,1,-1
+
+         pslog(i) = alog(pbot/100000.)
+
+        if(i.eq.nCells) then
+
+            do k=1,nz1
+               dpdz(k,i) = - gravity/(rgas*temper(k,i)*zz(k,i))
+            end do
+
+            zint  =  pslog(i) + .5*dzw(1)*dpdz(1,i)
+
+            call mpas_log_write('$r $r $r $r', realArgs=(/zint, -dpdz(1,i),zgrid(2,i),zz(1,i)/))
+
+            do k=2,nz1
+               zint = zint + dzu(k)*(fzm(k)*dpdz(k  ,i)+fzp(k)*dpdz(k-1,i))
+
+            call mpas_log_write('$i $r $r $r $r', intArgs=(/k/), realArgs=(/zint, -dpdz(k,i),zgrid(k+1,i),zz(k,i)/))
+
+            end do
+            zint  = zint  + .5*dzw(nz1)*dpdz(nz1,i)
+            ptop  (i) = p0*exp(zint )
+
+            pitop (i) = (ptop (i)/p0)**rcp
+
+            ptlogc = alog(ptop(nCells)/p0)
+            ptopc  = ptop(nCells)
+
+         else
+
+            ptop (i) = ptop (nCells)
+            pitop(i) = pitop(nCells)
+
+            do k=1,nz1
+               dpdz(k,i) = - gravity/(rgas*temper(k,i)*zz(k,i))
+            end do
+
+            zint  =  ptlogc - .5*dzw(nz1)*dpdz(nz1,i)
+            do k=nz1-1,1,-1
+               zint=zint - dzu(k+1)*(fzm(k+1)*dpdz(k+1,i)+fzp(k+1)*dpdz(k  ,i))
+            end do
+            zint  = zint - .5*dzw(1)*dpdz(1,i)
+
+!            if(diurnal)  then                                                                                                         
+!               pslog(i) = pslog(i) - gravity/(rgas*tbot)*hx(i)                                                                        
+!            else                                                                                                                      
+!!               pslog(i) = zint                                                                                                       
+!            end if                                                                                                                    
+         end if
+ 
+      end do
+
+      call mpas_log_write(' ptop(nCells)  = $r ',realArgs=(/.01*ptop(nCells)/))
+      call mpas_log_write(' ptopc    = $r ',realArgs=(/ptopc/))
+      call mpas_log_write(' ptlogc   = $r ',realArgs=(/ptlogc/))
+      call mpas_log_write(' pitop(nCells) = $r $r $r ',realArgs=(/pitop(nCells),rgas,cp/))
+
+      do i=1,nCells
+
+         zint  =  pslog(i) + .5*dzw(1)*dpdz(1,i)
+         pp (1,i) = p0*exp(zint )
+         do k=2,nz1
+            zint = zint + dzu(k)*(fzm(k)*dpdz(k,i)+fzp(k)*dpdz(k-1,i))
+            pp (k,i) = p0*exp(zint )
+         end do
+
+         do k=1,nz1
+
+            p (k,i) = (pp (k,i)/p0)**rcp
+            t (k,i) = temper(k,i)/p (k,i)
+            rr (k,i) = p (k,i)**((1.-rcp)/rcp)/(rgas/p0*t (k,i)*zz(k,i))
+
+            pb (k,i) = 0.
+            rb (k,i) = 0.
+            rtb(k,i) = 0.
+            cqw(k,i) = 1.
+         end do
+
+      end do
+
+!     End of code for reference sounding       
+
+       call mpas_log_write(' ***** base state sounding ***** ')
+       call mpas_log_write('k       pb        p         rb         rtb         rr          tb          t')
+       do k=1,nVertLevels
+          call mpas_log_write('$i $r $r $r $r $r $r $r', intArgs=(/k/), realArgs=(/pb(k,1),   &
+                                          p(k,1),rb(k,1),rtb(k,1),rr(k,1),tb(k,1),t(k,1)/))
+       end do
+
+       scalars(index_qv,:,:) = 0.
+
+!!!****************** Mods inserted to here
+
+!-------------------------------------------------------------------
+!     ITERATIONS TO CONVERGE MOIST SOUNDING
+
+       do itr=1,30
+
+!!        do i = 1,nCells  
+        do i = nCells,1,-1
+
+            do k=1,nz1
+               dpdz(k,i) = - gravity*rr(k,i)*(1.+scalars(index_qv,k,i))/pp(k,i)  
+            end do
+
+            zint  = pslog(i) + .5*dzw(1)*dpdz(1,i)
+
+            do k=2,nz1
+               zint = zint + dzu(k)*(fzm(k)*dpdz(k  ,i)+fzp(k)*dpdz(k-1,i))       
+            end do
+            zint = zint + .5*dzw(nz1)*dpdz(nz1,i)
+
+            ptlog(i) = zint
+            ptop (i)= p0*exp(zint)
+!
+!!            ptlog(i) = ptlog(1)
+!!            ptop (i) = ptop (1)
+            ptlog(i) = ptlog(nCells)
+            ptop (i) = ptop (nCells)
+!                                                                       
+            if(i.eq.nCells.and.itr.eq.30)  then
+               call mpas_log_write(' ztop = $r ',realArgs=(/.001*zgrid(nz,i)/))
+               call mpas_log_write(' zint = $r ',realArgs=(/zint/))
+               call mpas_log_write(' ptop = $r ',realArgs=(/.01*ptop(i)/))
+            end if
+
+            plog(1,i) = pslog(i) + .5*dzw(1)*dpdz(1,i)
+            pp  (1,i) = p0*exp(plog(1,i))
+
+            do k=2,nz1
+               plog(k,i) = plog(k-1,i) + dzu(k)*(fzm(k)*dpdz(k,i)+fzp(k)*dpdz(k-1,i))
+               pp  (k,i) = p0*exp(plog(k,i))
+            end do
+
+            do k=1,nz1
+               p  (k,i) = (pp(k,i)/p0)**rcp
+               t  (k,i) = temper(k,i)/p(k,i)
+               rr (k,i) = pp (k,i)/(rgas*(1.+1.61*scalars(index_qv,k,i))*temper(k,i)*zz(k,i))
+               rt (k,i) = rr (k,i)*t(k,i)
+            end do
+!
+!     update water vapor mixing ratio from humitidty profile
+!
+           do k=1,nz1
+              temp   = p(k,i)*t(k,i)
+              pres   = p0*p(k,i)**(1./rcp)
+              if(temp.ge.273.)  then
+                 qvs    = 380.*exp( 17.27*(temp-273.)/(temp-36.))/pres
+              else
+                 qvs    = 380.*exp(21.875*(temp-273.)/(temp-7.5))/pres
+              end if   
+              scalars(index_qv,k,i) = min(0.014_RKIND,relhum(k,i)*qvs)
+           end do
+                         
+           do k=1,nz1
+              t (k,i) = t(k,i)*(1.+1.61*scalars(index_qv,k,i))
+           end do
+           do k=2,nz1
+              cqw(k,i) = 1./(1.+.5*( scalars(index_qv,k-1,i)  &
+                                    +scalars(index_qv,k  ,i)))
+           end do
+
+        end do ! loop over cells
+
+      end do !  iteration loop
+
+!!!JBK -  Calculation of new height of the constant pressure model top
+
+      if(const_ptop.eq.1)  then
+
+         do i=1,nCells
+
+            hzt (i) = hzt(i)+1.*rgas/gravity*(1.5*plog(nz1,i) - .5*plog(nz1-1,i) - ptlogc)  &
+                               *(1.5*p(nz1  ,i)*t(nz1  ,i) - .5*p(nz1-1,i)*t(nz1-1,i))
+         end do
+
+         do iCell=1,nCells
+            if(abs(latCell(iCell)).lt..01)  then
+               call mpas_log_write('$i $i $i $r $r $r $r', intArgs=(/iitr,nCells,iCell/),                  &
+                      realArgs=(/latCell(iCell),lonCell(iCell),xCell(iCell),hzt(iCell)/))
+            end if
+         end do
+
+         if(smooth_ztop.gt.0)  then
+
+            allocate(hztt(nCells+1))
+
+            do i=1,smooth_ztop
+
+               do iCell=1,nCells
+                  hztt (iCell) = hzt(iCell)
+                  hzt  (iCell) = 0.
+               end do
+
+               do iCell=1,nCells
+
+                  do j = 1,nEdgesOnCell(iCell)
+
+                     ! For smoothing at cells along the boundary of the mesh, set the height value
+                     ! for non-existent neighbors, which map to the "garbage cell", to the same as
+                     ! the height in the cell being smoothed
+                     
+                     if (cellsOnCell(j,iCell) == nCells+1) then
+                        hztt(nCells+1) = hztt(iCell)
+                     end if
+
+                     hzt(iCell) = hzt(iCell) +  dvEdge(edgesOnCell(j,iCell))    &
+                                              / dcEdge(edgesOnCell(j,iCell))    &
+                                               * (hztt(cellsOnCell(j,iCell))-hztt(iCell))
+                  end do
+                  hzt(iCell) = hztt(iCell)  + 0.1875*hzt(iCell)
+               end do
+
+               call mpas_dmpar_exch_halo_field(hzt_field)
+
+            end do
+
+            do iCell=1,nCells
+                 if(abs(latCell(iCell)).lt..01)  then
+                   call mpas_log_write('$i $i $r $r $r $r $r', intArgs=(/iitr,iCell/),                  &
+                         realArgs=(/latCell(iCell),lonCell(iCell),xCell(iCell),hzt(iCell),hztt(iCell)/))
+                 end if
+            end do
+
+            deallocate(hztt)
+         end if
+      end if
+
+      call mpas_log_write(' *** perturbation height of top boundary ***')
+      call mpas_log_write('   Iteration X   HZT       Temp        Pres    ptop')
+
+      do i=40,nCells,40
+          call mpas_log_write('$i $r $r $r $r $r', intArgs=(/iitr/),                  &
+             realArgs=(/xCell(i),hzt(i),t(nz1,i)*p(nz1,i),.01*pp(nz1,i),.01*ptop/))
+      end do
+      
+!!!JBK -  End of loop to iterate to initial height of constant pressure ztop 
+
+     end do
+
+!!!JBK 
+!
+!----------------------------------------------------------------------
+!
+      call mpas_log_write(' *** sounding for the simulation ***')
+      call mpas_log_write('    Z       Temp        theta       pres         qv       rho_m        u        rr')
+      do k=1,nz1
+
+         call mpas_log_write('$r $r $r $r $r $r $r $r', realArgs=(/.5*(zgrid(k,nCells)+zgrid(k+1,nCells))/1000.,   & 
+                       temper(k,nCells),t(k,nCells)/(1.+1.61*scalars(index_qv,k,nCells)),     & 
+                       .01*p0*p(k,nCells)**(1./rcp),                                          & 
+                       1000.*scalars(index_qv,k,nCells),                                      & 
+                       (rb(k,nCells)+rr(k,nCells))*(1.+scalars(index_qv,k,nCells)),           & 
+                       u_init(k), rr(k,nCells)/))
+      end do
+         
+      do i=1,nCells
+         if(abs(latCell(i)).lt.0.1)  then
+            call mpas_log_write(' i, lat, lon   = $i $r $r ',intArgs=(/i/),realArgs=(/latCell(i),lonCell(i)/))
+         end if
+      end do
+
+      do i=1,nCells
+         do k=1,nz1
+            rho_zz(k,i) = rb(k,i)+rr(k,i)
+         end do
+
+        do k=1,nz1
+            t_init(k,i) = t(k,i)
+        end do
+      end do
+
+      do i=1,nEdges
+        cell1 = cellsOnEdge(1,i)
+        cell2 = cellsOnEdge(2,i)
+        if(cell1 <= nCellsSolve .or. cell2 <= nCellsSolve) then
+          do k=1,nz1
+            ru (k,i)  = 0.5*(rho_zz(k,cell1)+rho_zz(k,cell2))*u(k,i)    
+          end do
+        end if
+      end do
+
+!
+!     pre-calculation z-metric terms in omega eqn.
+!
+      do iEdge = 1,nEdges
+         cell1 = cellsOnEdge(1,iEdge)
+         cell2 = cellsOnEdge(2,iEdge)
+         if (cell1 <= nCellsSolve .or. cell2 <= nCellsSolve ) then
+
+            do k = 1, nVertLevels
+
+               if (config_theta_adv_order == 2) then
+
+                  z_edge = (zgrid(k,cell1)+zgrid(k,cell2))/2.
+
+               else !theta_adv_order == 3 or 4 
+
+                  d2fdx2_cell1 = deriv_two(1,1,iEdge) * zgrid(k,cell1)
+                  d2fdx2_cell2 = deriv_two(1,2,iEdge) * zgrid(k,cell2)
+                  do i=1, nEdgesOnCell(cell1)
+                     if ( cellsOnCell(i,cell1) > 0)       &
+                     d2fdx2_cell1 = d2fdx2_cell1 + deriv_two(i+1,1,iEdge) * zgrid(k,cellsOnCell(i,cell1))
+                  end do
+                  do i=1, nEdgesOnCell(cell2)
+                     if ( cellsOnCell(i,cell2) > 0)       &
+                     d2fdx2_cell2 = d2fdx2_cell2 + deriv_two(i+1,2,iEdge) * zgrid(k,cellsOnCell(i,cell2))
+                  end do             
+             
+                  z_edge =  0.5*(zgrid(k,cell1) + zgrid(k,cell2))         &
+                                - (dcEdge(iEdge) **2) * (d2fdx2_cell1 + d2fdx2_cell2) / 12. 
+
+                  if (config_theta_adv_order == 3) then
+                     z_edge3 =  - (dcEdge(iEdge) **2) * (d2fdx2_cell1 - d2fdx2_cell2) / 12.   
+                  else 
+                     z_edge3 = 0.
+                  end if
+
+               end if
+
+                  zb(k,1,iEdge) = (z_edge-zgrid(k,cell1))*dvEdge(iEdge)/areaCell(cell1) 
+                  zb(k,2,iEdge) = (z_edge-zgrid(k,cell2))*dvEdge(iEdge)/areaCell(cell2) 
+                  zb3(k,1,iEdge)=  z_edge3*dvEdge(iEdge)/areaCell(cell1) 
+                  zb3(k,2,iEdge)=  z_edge3*dvEdge(iEdge)/areaCell(cell2) 
+  
+            end do
+
+         end if
+       end do
+
+!     for including terrain
+      w(:,:) = 0.0
+      rw(:,:) = 0.0
+
+!
+!     calculation of omega, rw = zx * ru + zz * rw
+!
+
+      do iEdge = 1,nEdges
+
+         cell1 = cellsOnEdge(1,iEdge)
+         cell2 = cellsOnEdge(2,iEdge)
+
+         if (cell1 <= nCellsSolve .or. cell2 <= nCellsSolve ) then
+         do k = 2, nVertLevels
+            flux =  (fzm(k)*ru(k,iEdge)+fzp(k)*ru(k-1,iEdge))  
+            rw(k,cell2) = rw(k,cell2) + (fzm(k)*zz(k,cell2)+fzp(k)*zz(k-1,cell2))*zb(k,2,iEdge)*flux 
+            rw(k,cell1) = rw(k,cell1) - (fzm(k)*zz(k,cell1)+fzp(k)*zz(k-1,cell1))*zb(k,1,iEdge)*flux 
+
+            if (config_theta_adv_order ==3) then
+               rw(k,cell2) = rw(k,cell2)    &
+                                            - sign(1.0_RKIND,ru(k,iEdge))*config_coef_3rd_order* &
+                                              (fzm(k)*zz(k,cell2)+fzp(k)*zz(k-1,cell2))*zb3(k,2,iEdge)*flux
+               rw(k,cell1) = rw(k,cell1)    &
+                                            + sign(1.0_RKIND,ru(k,iEdge))*config_coef_3rd_order* &
+                                              (fzm(k)*zz(k,cell1)+fzp(k)*zz(k-1,cell1))*zb3(k,1,iEdge)*flux
+            end if
+
+         end do
+         end if
+
+      end do
+
+      ! Compute w from rho_zz and rw
+      do iCell=1,nCells
+         do k=2,nVertLevels
+            w(k,iCell) = rw(k,iCell) / (fzp(k) * rho_zz(k-1,iCell) + fzm(k) * rho_zz(k,iCell))
+         end do
+      end do
+
+      !        
+      ! Generate rotated Coriolis field would go here
+      !          
+      do iEdge=1,nEdges
+
+         fEdge(iEdge) = 2.0 * omega_e * &
+                                       ( -cos(lonEdge(iEdge)) * cos(latEdge(iEdge)) * sin(alpha_grid) + &
+                                         sin(latEdge(iEdge)) * cos(alpha_grid) &
+                                       )
+      end do
+
+      do iVtx=1,nVertices
+         fVertex(iVtx) = 2.0 * omega_e * &
+                                         (-cos(lonVertex(iVtx)) * cos(latVertex(iVtx)) * sin(alpha_grid) + &
+                                          sin(latVertex(iVtx)) * cos(alpha_grid) &
+                                         )
+      end do
+
+
+!      do iEdge=1,nEdges
+!         fEdge(iEdge) = 0.
+!      end do
+
+!      do iVtx=1,nVertices
+!         fVertex(iVtx) = 0.
+!      end do
+
+      !
+      ! Compute mass fluxes tangential to each edge (i.e., through the faces of dual grid cells)
+      !
+      v(:,:) = 0.0
+      do iEdge = 1, nEdges
+         do i=1,nEdgesOnEdge(iEdge)
+            eoe = edgesOnEdge(i,iEdge)
+            if (eoe > 0) then
+               do k = 1, nVertLevels
+                 v(k,iEdge) = v(k,iEdge) + weightsOnEdge(i,iEdge) * u(k, eoe)
+              end do
+            end if
+         end do
+      end do
+
+!      do k=1,nVertLevels
+!        call mpas_log_write(' k,u_init, t_init = $i $r $r $r', intArgs=(/k/), realArgs=(/u_init(k),t_init(k,1)/))
+!      end do
+
+      ! Compute rho and theta from rho_zz and theta_m
+      
+      do iCell=1,nCells
+         do k=1,nVertLevels
+            rho  (k,iCell) = rho_zz(k,iCell) * zz(k,iCell)
+            theta(k,iCell) = t(k,iCell) / (1.0 + 1.61 * scalars(index_qv,k,iCell))
+         end do
+      end do
+
+      !     Temporary diagnostics
+      
+            scalar_min = 100000.0
+            scalar_max = 0.0
+            do iCell = 1, nCells
+               do k = 1, nVertLevels
+                  scalar_min = min(scalar_min, theta(k,iCell)*p(k,iCell))
+	          scalar_max = max(scalar_max, theta(k,iCell)*p(k,iCell))
+               end do
+            end do
+            call mpas_log_write('global min, max T $r $r', realArgs=(/scalar_min, scalar_max/))
+
+            call mpas_log_write('global min, max HZT $r $r', realArgs=(/minval(hzt(:)), maxval(hzt(:))/))
+
+
+            call mpas_log_write(' *** vertical profile at iCell=1 ***')
+            call mpas_log_write(' k   Z       Temp        Pres        U          W ')
+
+            i = 1
+            do k=1,nVertlevels
+               call mpas_log_write('$i $r $r $r', intArgs=(/k/),realArgs=(/zgrid(k,i),theta(k,i)*p(k,i),.01*p0*p(k,i)**(cp/rgas)/))
+            end do
+
+    end subroutine init_global_deep_atm_case
 
    subroutine init_atm_case_gfs(block, mesh, nCells, nEdges, nVertLevels, fg, state, diag, diag_physics, dims, configs)
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2920,6 +5269,7 @@ module init_atm_cases
       call mpas_pool_get_array(state, 'theta_m', t)
       call mpas_pool_get_array(diag, 'rtheta_p', rt)
       call mpas_pool_get_array(state, 'scalars', scalars)
+
       call mpas_pool_get_array(state, 'u', u)
       call mpas_pool_get_array(state, 'w', w)
       call mpas_pool_get_array(diag, 'theta', theta)

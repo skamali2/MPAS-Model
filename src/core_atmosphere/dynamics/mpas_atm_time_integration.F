@@ -1996,7 +1996,11 @@ module atm_time_integration
       type (mpas_pool_type), intent(in) :: configs
       integer, intent(in) :: cellStart, cellEnd, edgeStart, edgeEnd
       integer, intent(in) :: cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd
-
+!!!   JBK
+      integer, pointer :: kzp, const_ptop   
+      real (kind=RKIND), dimension(:), pointer :: zeta_cofw
+      real (kind=RKIND), dimension(:), pointer :: dhztdtm 
+!!!   JBK
       integer, pointer :: nCells, nEdges, nCellsSolve
       integer, dimension(:), pointer :: nEdgesOnCell
       integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell
@@ -2019,7 +2023,12 @@ module atm_time_integration
 
 ! regional_MPAS: get specified zone cell mask
       call mpas_pool_get_array(mesh, 'bdyMaskCell', bdyMaskCell)
-
+!!!JBK
+      call mpas_pool_get_array(mesh, 'zeta_cofw' , zeta_cofw)
+      call mpas_pool_get_array(mesh, 'dhztdtm'   , dhztdtm)
+      call mpas_pool_get_array(mesh, 'const_ptop', const_ptop)
+      call mpas_pool_get_array(mesh, 'kzp', kzp)
+!!!JBK
       call mpas_pool_get_array(mesh, 'zz', zz)
       call mpas_pool_get_array(mesh, 'zb', zb)
       call mpas_pool_get_array(mesh, 'zb3', zb3)
@@ -2059,6 +2068,9 @@ module atm_time_integration
                                    nEdgesOnCell, cellsOnEdge, edgesOnCell, fzm, fzp, ruAvg, wwAvg, zb, zb3, zb_cell, zb3_cell, &
                                    zz, w_tend, u_tend, rho_pp, rho_p_save, rho_p, ru_p, ru, ru_save, &
                                    rtheta_pp, rtheta_p_save, rtheta_p, rtheta_pp_old, rw_p, rw_save, rw, &
+!!!JBK
+                                   const_ptop, kzp, zeta_cofw, dhztdtm,    &
+!!!JBK                                   
                                    bdyMaskCell, &  ! added for regional_MPAS
                                    edgesOnCell_sign, &
                                    cellStart, cellEnd, edgeStart, edgeEnd, &
@@ -2072,7 +2084,10 @@ module atm_time_integration
                                    nEdgesOnCell, cellsOnEdge, edgesOnCell, fzm, fzp, ruAvg, wwAvg, zb, zb3, zb_cell, zb3_cell, &
                                    zz, w_tend, u_tend, rho_pp, rho_p_save, rho_p, ru_p, ru, ru_save, &
                                    rtheta_pp, rtheta_p_save, rtheta_p, rtheta_pp_old, rw_p, rw_save, rw, &
-                                   bdyMaskCell, &  ! added for regional_MPAS
+!!!JBK
+                                   const_ptop, kzp, zeta_cofw, dhztdtm,    &
+!!!JBK                                   
+                                   bdyMaskCell, & ! added for regional_MPAS
                                    edgesOnCell_sign, &
                                    cellStart, cellEnd, edgeStart, edgeEnd, &
                                    cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd)
@@ -2085,8 +2100,12 @@ module atm_time_integration
       !
       ! Dummy arguments
       !
+!!!JBK
+      integer, intent(in)                         :: const_ptop, kzp
+      real (kind=RKIND), dimension(nVertLevels+1) :: zeta_cofw
+      real (kind=RKIND), dimension(nCells+1)      :: dhztdtm
+!!!JBK
       integer, intent(in) :: nCells, nEdges, nCellsSolve
-
       integer, intent(in) :: cellStart, cellEnd, edgeStart, edgeEnd
       integer, intent(in) :: cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd
 
@@ -2147,6 +2166,22 @@ module atm_time_integration
             end do
          end do
 !DIR$ IVDEP
+!!!JBK                                                                                            
+         if(const_ptop.eq.1)  then
+            do k = max(kzp,2),nVertLevels
+               
+!!!         Addition of z_tt*rho term
+               
+               w_tend(k,iCell) = w_tend(k,iCell) - zeta_cofw(k)*dhztdtm(iCell)*(fzm(k)*rho_p(k,iCell)+fzp(k)*rho_p(k-1,iCell))
+
+!!             if(iCell.eq.cellSolveEnd/2)  then
+!!                call mpas_log_write('iCell, k, w_tend(k,iCell), zeta_cofw(k), rho_p(k,iCell) = $i $i $r $r $r', intArgs=(/iCell,k/),  &
+!!                                    realArgs=(/w_tend(k,iCell), zeta_cofw(k), rho_p(k,iCell)/))
+!!             end if
+
+            end do
+         end if
+!!!JBK
          do k = 2, nVertLevels
             w_tend(k,iCell) = ( fzm(k) * zz(k,iCell) + fzp(k) * zz(k-1,iCell)   ) * w_tend(k,iCell)
          end do
@@ -2205,7 +2240,7 @@ module atm_time_integration
       integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell
       real (kind=RKIND), dimension(:,:), pointer :: edgesOnCell_sign
 
-      real (kind=RKIND), pointer :: epssm
+      real (kind=RKIND), pointer :: epssm, dragr, dragrw
 
       real (kind=RKIND), pointer :: cf1, cf2, cf3
 
@@ -2275,7 +2310,10 @@ module atm_time_integration
       call mpas_pool_get_array(mesh, 'cf1', cf1)
       call mpas_pool_get_array(mesh, 'cf2', cf2)
       call mpas_pool_get_array(mesh, 'cf3', cf3)
-
+!!!Rayleigh drag coefficients
+      call mpas_pool_get_array(mesh, 'dragr', dragr)
+      call mpas_pool_get_array(mesh, 'dragrw', dragrw)
+!!!JBK                                                                                                                       
 ! redefine ru_p to be perturbation from time t, change 3b ! temporary
       call mpas_pool_get_array(diag, 'ru', ru)
       call mpas_pool_get_array(diag, 'ru_save', ru_save)
@@ -2292,7 +2330,7 @@ module atm_time_integration
                                    rho_pp, cofwt, coftz, zxu, a_tri, alpha_tri, gamma_tri, dss, tend_ru, tend_rho, tend_rt, &
                                    tend_rw, zgrid, cofwr, cofwz, w, ru, ru_save, rw, rw_save, fzm, fzp, rdzw, dcEdge, invDcEdge, &
                                    invAreaCell, cofrz, dvEdge, nEdgesOnCell, cellsOnEdge, edgesOnCell, edgesOnCell_sign, &
-                                   dts, small_step, epssm, cf1, cf2, cf3, &
+                                   dts, small_step, epssm, cf1, cf2, cf3, dragr, dragrw, &
                                    etp, etm, ewp, ewm,    &
                                    specZoneMaskEdge, specZoneMaskCell &
                                    )
@@ -2306,7 +2344,7 @@ module atm_time_integration
                                    rho_pp, cofwt, coftz, zxu, a_tri, alpha_tri, gamma_tri, dss, tend_ru, tend_rho, tend_rt, &
                                    tend_rw, zgrid, cofwr, cofwz, w, ru, ru_save, rw, rw_save, fzm, fzp, rdzw, dcEdge, invDcEdge, &
                                    invAreaCell, cofrz, dvEdge, nEdgesOnCell, cellsOnEdge, edgesOnCell, edgesOnCell_sign, &
-                                   dts, small_step, epssm, cf1, cf2, cf3, &
+                                   dts, small_step, epssm, cf1, cf2, cf3, dragr, dragrw, &
                                    etp, etm, ewp, ewm,    &
                                    specZoneMaskEdge, specZoneMaskCell &
                                    )
@@ -2380,6 +2418,7 @@ module atm_time_integration
       real (kind=RKIND), intent(in) :: dts, epssm,cf1, cf2, cf3
       real (kind=RKIND), dimension(nVertLevels) :: ts, rs
 !!!JBK
+      real (kind=RKIND) :: dragr, dragrw
       real (kind=RKIND), dimension(nVertLevels  ) :: etp,etm
       real (kind=RKIND), dimension(nVertLevels+1) :: ewp,ewm
 !!!JBK
@@ -2418,10 +2457,17 @@ module atm_time_integration
 
 !DIR$ IVDEP
               do k=1,nVertLevels
-                 pgrad = ((rtheta_pp(k,cell2)-rtheta_pp(k,cell1))*invDcEdge(iEdge) )/(.5*(zz(k,cell2)+zz(k,cell1)))
+!!!JBK This next line looks like is ie missing zz multiplying the rtheta_pp terms
+!!!                 pgrad = ((rtheta_pp(k,cell2)-rtheta_pp(k,cell1))*invDcEdge(iEdge) )/(.5*(zz(k,cell2)+zz(k,cell1)))
+                 pgrad = ((zz(k,cell2)*rtheta_pp(k,cell2)-zz(k,cell1)*rtheta_pp(k,cell1))*invDcEdge(iEdge) )/(.5*(zz(k,cell2)+zz(k,cell1)))
+!!!JBK 
                  pgrad = cqu(k,iEdge)*0.5*c2*(exner(k,cell1)+exner(k,cell2))*pgrad
                  pgrad = pgrad + 0.5*zxu(k,iEdge)*gravity*(rho_pp(k,cell1)+rho_pp(k,cell2))
                  ru_p(k,iEdge) = ru_p(k,iEdge) + dts*(tend_ru(k,iEdge) - (1.0_RKIND - specZoneMaskEdge(iEdge))*pgrad)
+
+!!!JBK           mod to add Rayleigh damping          
+                 ru_p(k,iEdge) = (ru_p(k,iEdge) - dts*dragr*ru_save(k,iEdge))/(1.+dts*dragr)
+!!!JBK               
               end do
 
               ! accumulate ru_p for use later in scalar transport
@@ -2447,6 +2493,10 @@ module atm_time_integration
 !DIR$ IVDEP
               do k=1,nVertLevels
                  ru_p(k,iEdge) = dts*tend_ru(k,iEdge)
+
+!!!JBK           mod to add Rayleigh damping         
+                 ru_p(k,iEdge) = (ru_p(k,iEdge) - dts*dragr*ru_save(k,iEdge))/(1.+dts*dragr)
+!!!JBK      
               end do
 !DIR$ IVDEP
               do k=1,nVertLevels
@@ -2547,12 +2597,19 @@ module atm_time_integration
 
 !DIR$ IVDEP
          do k=2,nVertLevels
-            rw_p(k,iCell) = (rw_p(k,iCell) + (rw_save(k  ,iCell) - rw(k  ,iCell)) -dts*dss(k,iCell)*               &
-                        (fzm(k)*zz (k,iCell)+fzp(k)*zz (k-1,iCell))        &
-                        *(fzm(k)*rho_zz(k,iCell)+fzp(k)*rho_zz(k-1,iCell))       &
-                                 *w(k,iCell)    )/(1.0+dts*dss(k,iCell)) &
-                         - (rw_save(k  ,iCell) - rw(k  ,iCell))
-         end do
+!!!          This Rayleigh damping term doesn't seem to work with a constant pressure upper boundary            
+!            rw_p(k,iCell) = (rw_p(k,iCell) + (rw_save(k  ,iCell) - rw(k  ,iCell)) -dts*dss(k,iCell)*               &
+!                        (fzm(k)*zz (k,iCell)+fzp(k)*zz (k-1,iCell))        &
+!                        *(fzm(k)*rho_zz(k,iCell)+fzp(k)*rho_zz(k-1,iCell))       &
+!                                 *w(k,iCell)    )/(1.0+dts*dss(k,iCell)) &
+!                                 - (rw_save(k  ,iCell) - rw(k  ,iCell))
+
+!!!JBK      mod to include extra Rayleigh damping
+
+            rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)              ))/(1.0+dts*(dragrw+dss(k,iCell))) 
+
+!!!JBK
+        end do
 
          ! accumulate (rho*omega)' for use later in scalar transport
 !DIR$ IVDEP
@@ -2697,6 +2754,18 @@ module atm_time_integration
       real (kind=RKIND) :: invNs, rcv, p0, flux
       real (kind=RKIND), pointer :: cf1, cf2, cf3
 
+!!!JBK - for const_ptop
+      integer,                             pointer :: kzp, smooth_ztop, ztop_update_interval, const_ptop
+      real (kind=RKIND),                   pointer :: ptlogc, coefficient_ztop_update
+      real (kind=RKIND), dimension(:),     pointer :: hzt, dhztdt, dhztdtm
+      real (kind=RKIND), dimension(:),     pointer :: zeta_cofw,zw
+      real (kind=RKIND), dimension(:),     pointer :: zeta_coft, dcEdge
+      real (kind=RKIND), dimension(:,:),   pointer :: zgrid, zxu, levels_z
+      real (kind=RKIND), dimension(:,:,:), pointer :: deriv_two
+      real (kind=RKIND), dimension(:),     pointer :: areaCell, dvEdge
+      integer, dimension(:,:),             pointer :: cellsOnCell
+      integer,                             pointer :: config_theta_adv_order
+!!!JBK 
       integer, dimension(:), pointer :: bdyMaskCell  ! MPAS_regional addition
 
       call mpas_pool_get_array(diag, 'wwAvg', wwAvg)
@@ -2730,7 +2799,9 @@ module atm_time_integration
 
       call mpas_pool_get_array(diag, 'pressure_p', pressure_p)
       call mpas_pool_get_array(diag, 'pressure_base', pressure_b)
-
+!!!JBK - for const_ptop
+      call mpas_pool_get_array(diag, 'levels_z', levels_z)
+!!!JBK
       call mpas_pool_get_array(mesh, 'bdyMaskCell', bdyMaskCell)  ! addition for regional_MPAS
 
       call mpas_pool_get_array(mesh, 'zz', zz)
@@ -2754,9 +2825,30 @@ module atm_time_integration
       call mpas_pool_get_array(mesh, 'cf1', cf1)
       call mpas_pool_get_array(mesh, 'cf2', cf2)
       call mpas_pool_get_array(mesh, 'cf3', cf3)
+!!!JBK - for const_ptop
+      call mpas_pool_get_array(mesh, 'const_ptop', const_ptop)
+      call mpas_pool_get_array(mesh, 'kzp'       , kzp)
+      call mpas_pool_get_array(mesh, 'smooth_ztop', smooth_ztop)
+      call mpas_pool_get_array(mesh, 'ztop_update_interval', ztop_update_interval)
+      call mpas_pool_get_array(mesh, 'ptlogc'    , ptlogc)
+      call mpas_pool_get_array(mesh, 'hzt'       , hzt)
+      call mpas_pool_get_array(mesh, 'dhztdt'    , dhztdt)
+      call mpas_pool_get_array(mesh, 'dhztdtm'   , dhztdtm)
+      call mpas_pool_get_array(mesh, 'coefficient_ztop_update'   , coefficient_ztop_update)
+      call mpas_pool_get_array(mesh, 'zeta_coft' , zeta_coft)
+      call mpas_pool_get_array(mesh, 'zeta_cofw' , zeta_cofw)
+      call mpas_pool_get_array(mesh, 'zw'        , zw)
+      call mpas_pool_get_array(mesh, 'zgrid'     , zgrid)
+      call mpas_pool_get_array(mesh, 'zxu'       , zxu)
+      call mpas_pool_get_array(mesh, 'dcEdge'    , dcEdge)
+      call mpas_pool_get_array(mesh, 'deriv_two' , deriv_two)
+      call mpas_pool_get_array(mesh, 'cellsOnCell', cellsOnCell)
+      call mpas_pool_get_array(mesh, 'areaCell'  , areaCell)
+      call mpas_pool_get_array(mesh, 'dvEdge'    , dvEdge)
+      call mpas_pool_get_config(configs, 'config_theta_adv_order', config_theta_adv_order) 
+!!!JBK
 
-
-      call atm_recover_large_step_variables_work(nCells, nEdges, nCellsSolve, nEdgesSolve, dt, ns, rk_step, &
+      call atm_recover_large_step_variables_work(mesh,nCells, nEdges, nCellsSolve, nEdgesSolve, dt, ns, rk_step, &  
                              wwAvg, rw_save, w, rw, rw_p, rtheta_p, rtheta_pp, rtheta_p_save, rt_diabatic_tend, rho_p, &
                              rho_p_save, rho_pp, rho_zz, rho_base, ruAvg, ru_save, ru_p, u, ru, exner, exner_base, &
                              rtheta_base, pressure_p, zz, theta_m, pressure_b, scalars, fzm, fzp, &
@@ -2764,12 +2856,17 @@ module atm_time_integration
                              cf1, cf2, cf3, &
                              bdyMaskCell, &  !  addition for regional_MPAS
                              cellStart, cellEnd, vertexStart, vertexEnd, edgeStart, edgeEnd, &
-                             cellSolveStart, cellSolveEnd, vertexSolveStart, vertexSolveEnd, edgeSolveStart, edgeSolveEnd)
+                             cellSolveStart, cellSolveEnd, vertexSolveStart, vertexSolveEnd, edgeSolveStart, edgeSolveEnd, &
+!!!JBK - for const_ptop
+                             const_ptop, smooth_ztop, ztop_update_interval,  &
+                             kzp,ptlogc,zeta_coft,zeta_cofw,zgrid,zxu,zw,dcEdge,dhztdt,dhztdtm,coefficient_ztop_update,levels_z,    & 
+                             config_theta_adv_order, deriv_two, cellsOnCell, areaCell, dvEdge) 
+!!!JBK
 
-   end subroutine atm_recover_large_step_variables
+      end subroutine atm_recover_large_step_variables
 
 
-   subroutine atm_recover_large_step_variables_work(nCells, nEdges, nCellsSolve, nEdgesSolve, dt, ns, rk_step, &
+   subroutine atm_recover_large_step_variables_work(mesh,nCells, nEdges, nCellsSolve, nEdgesSolve, dt, ns, rk_step, &
                              wwAvg, rw_save, w, rw, rw_p, rtheta_p, rtheta_pp, rtheta_p_save, rt_diabatic_tend, rho_p, &
                              rho_p_save, rho_pp, rho_zz, rho_base, ruAvg, ru_save, ru_p, u, ru, exner, exner_base, &
                              rtheta_base, pressure_p, zz, theta_m, pressure_b, scalars, fzm, fzp, &
@@ -2777,13 +2874,19 @@ module atm_time_integration
                              cf1, cf2, cf3, &
                              bdyMaskCell, &  ! addition for regional_MPAS
                              cellStart, cellEnd, vertexStart, vertexEnd, edgeStart, edgeEnd, &
-                             cellSolveStart, cellSolveEnd, vertexSolveStart, vertexSolveEnd, edgeSolveStart, edgeSolveEnd)
-
+                             cellSolveStart, cellSolveEnd, vertexSolveStart, vertexSolveEnd, edgeSolveStart, edgeSolveEnd, &
+!!!JBK - for const_ptop
+                             const_ptop, smooth_ztop, ztop_update_interval,  &
+                             kzp,ptlogc,zeta_coft,zeta_cofw,zgrid,zxu,zw,dcEdge,dhztdt,dhztdtm,coefficient_ztop_update,levels_z,    & 
+                             config_theta_adv_order, deriv_two, cellsOnCell, areaCell, dvEdge)  
+!!!JBK
       use mpas_atm_dimensions
 
       implicit none
 
-
+!!!JBK - for const_ptop
+      type (mpas_pool_type), intent(inout) :: mesh
+!!!JBK
       !
       ! Dummy arguments
       !
@@ -2832,7 +2935,24 @@ module atm_time_integration
       integer, dimension(nCells+1) :: nEdgesOnCell
 
       real (kind=RKIND) :: cf1, cf2, cf3
+      
+!!!JBK for const_ptop
+      type (field1DReal), pointer                        :: hzt_field
 
+      integer                                            :: kzp, config_theta_adv_order, smooth_ztop, const_ptop, ztop_update_interval, ihzt
+      real (kind=RKIND)                                  :: ptlogc, coefficient_ztop_update, z_edge, z_edge3, d2fdx2_cell1, d2fdx2_cell2,scalar_min,scalar_max
+      real (kind=RKIND), dimension(nCells+1)             :: dhztdt, dhztdtm 
+      real (kind=RKIND), dimension(:),     pointer       :: hzt
+      real (kind=RKIND), dimension(:), pointer           :: hztt
+      real (kind=RKIND), dimension(nEdges+1)             :: dcEdge
+      real (kind=RKIND), dimension(nVertlevels  )        :: zeta_coft
+      real (kind=RKIND), dimension(nVertLevels+1)        :: zeta_cofw, zw           
+      real (kind=RKIND), dimension(nVertLevels+1,nCells+1) :: zgrid, levels_z 
+      real (kind=RKIND), dimension(nVertLevels,nEdges+1) :: zxu
+      real (kind=RKIND), dimension(:,:,:)                :: deriv_two
+      real (kind=RKIND), dimension(:)                    :: areaCell,dvEdge  
+      integer, dimension(:,:)                            :: cellsOnCell 
+!!!JBK
       integer, intent(in) :: cellStart, cellEnd, vertexStart, vertexEnd, edgeStart, edgeEnd
       integer, intent(in) :: cellSolveStart, cellSolveEnd, vertexSolveStart, vertexSolveEnd, edgeSolveStart, edgeSolveEnd
 
@@ -2840,9 +2960,13 @@ module atm_time_integration
       !
       ! Local variables
       !
-      integer :: i, iCell, iEdge, k, cell1, cell2
-      real (kind=RKIND) :: invNs, rcv, p0, flux
-
+!!!JBK - for const_ptop
+      integer                                :: i, iCell, iEdge, k, cell1, cell2,j
+      real (kind=RKIND)                      :: invNs, rcv, p0, flux, dz
+      real (kind=RKIND), dimension(nCells+1) :: hztm
+      call mpas_pool_get_field(mesh, 'hzt', hzt_field)
+      call mpas_pool_get_array(mesh, 'hzt', hzt)
+!!!JBK
 
       rcv = rgas/(cp-rgas)
       p0 = 1.0e+05  ! this should come from somewhere else...
@@ -2874,15 +2998,18 @@ module atm_time_integration
             wwAvg(k,iCell) = rw_save(k,iCell) + (wwAvg(k,iCell) * invNs)
             rw(k,iCell) = rw_save(k,iCell) + rw_p(k,iCell)
 
-          ! pick up part of diagnosed w from omega - divide by density later
-            w(k,iCell) = rw(k,iCell)/(fzm(k)*zz(k,iCell)+fzp(k)*zz(k-1,iCell))
+!!!JBK      pick up part of diagnosed w from omega - divide by density later
+!!!         w(k,iCell) = rw(k,iCell)/(fzm(k)*zz(k,iCell)+fzp(k)*zz(k-1,iCell))
                                       
+!!!         use wwAvg instead of rw to recover w   
+            w(k,iCell) = wwAvg(k,iCell)/(fzm(k)*zz(k,iCell)+fzp(k)*zz(k-1,iCell))
+!!!JBK           
          end do
-
-         w(nVertLevels+1,iCell) = 0.0
-
+!!!JBK
+!!!      w(nVertLevels+1,iCell) = 0.0
+!!!JBK
          if (rk_step == 3) then
-!DIR$ IVDEP
+!     DIR$ IVDEP
             do k = 1, nVertLevels
                rtheta_p(k,iCell) = rtheta_p_save(k,iCell) + rtheta_pp(k,iCell) &
                                  - dt * rho_zz(k,iCell) * rt_diabatic_tend(k,iCell)
@@ -2949,16 +3076,266 @@ module atm_time_integration
 
          w(1,iCell) = w(1,iCell)/(cf1*rho_zz(1,iCell)+cf2*rho_zz(2,iCell)+cf3*rho_zz(3,iCell))
 
-
          !DIR$ IVDEP
          do k = 2, nVertLevels
-           w(k,iCell) = w(k,iCell)/(fzm(k)*rho_zz(k,iCell)+fzp(k)*rho_zz(k-1,iCell))
+           w(k,iCell) = w(k,iCell)/(fzm(k)*rho_zz(k,iCell)+fzp(k)*rho_zz(k-1,iCell))  &
+!!!JBK - for const_ptop
+                            +zeta_cofw(k)*dhztdt(iCell)
          end do
-
+                                                                                                                                             
+         if(const_ptop.eq.1)  then
+            w(nVertlevels+1,iCell) = 2.*w(nVertlevels,iCell) - w(nVertlevels-1,iCell)
+         else
+            w(nVertLevels+1,iCell) = 0.0
+         end if
+!!!JBK
          end if ! addition for regional_MPAS, no spec zone update
 
       end do
 
+!!!JBK  Calculation of new height of the constant pressure model top
+
+      if (rk_step == 3) then
+      
+         call mpas_log_write('const_ptop, smooth_ztop, ztop_update_interval, coefficient_ztop_update $i $i $i $r',     &
+                      intArgs=(/const_ptop,smooth_ztop,ztop_update_interval/), realArgs=(/coefficient_ztop_update/))
+
+!!!   
+!!!   call mpas_log_write('dcEdge at iEdge = 1-6 = $r $r $r $r $r $r',realArgs=(/dcEdge(1),dcEdge(2),dcEdge(3),dcEdge(4),dcEdge(5),dcEdge(6)/))
+!!!      
+!!!   How can this local ihzt parameter be initialized to zero within this subroutine?
+      
+      ihzt = ihzt + 1
+      if(const_ptop.eq.1.and.ihzt.eq.ztop_update_interval)  then
+         ihzt = 0
+
+      call mpas_log_write('min and max values of hzt = $r $r', realArgs=(/minval(hzt(:)),maxval(hzt(:))/))
+         
+         do iCell=cellStart,cellEnd
+
+            hztm(iCell) = hzt(iCell)
+
+            hzt(iCell) = hzt(iCell)+coefficient_ztop_update*rgas/gravity    &
+                                                *(1.5*alog((pressure_p(nVertLevels  ,iCell)+pressure_b(nVertLevels  ,iCell))/p0) &
+                                                  -.5*alog((pressure_p(nVertLevels-1,iCell)+pressure_b(nVertLevels-1,iCell))/p0)-ptlogc) &
+                                                *(1.5*exner(nVertLevels  ,iCell)*theta_m(nVertLevels  ,iCell)                          &
+                                                 - .5*exner(nVertLevels-1,iCell)*theta_m(nVertLevels-1,iCell))
+
+!!!         call mpas_log_write('iCell and hzt, $i $r', intArgs=(/iCell/), realArgs=(/hzt(iCell)/))
+
+         end do
+
+         if(smooth_ztop.gt.0)  then
+
+            allocate(hztt(nCells+1))
+
+            do i=1,smooth_ztop
+
+               do iCell=cellStart,cellEnd
+                  hztt(iCell) = hzt(iCell)
+                  hzt (iCell) = 0.
+               end do
+
+               do iCell=cellStart,cellEnd
+
+                  do j = 1,nEdgesOnCell(iCell)
+
+                     ! For smoothing at cells along the boundary of the mesh, set the terrain value
+                     ! for non-existent neighbors, which map to the "garbage cell", to the same as 
+                     ! the terrain in the cell being smoothed
+                     if (cellsOnCell(j,iCell) == nCells+1) then
+                        hztt(nCells+1) = hztt(iCell)
+                     end if
+
+                     hzt(iCell) = hzt(iCell) +  dvEdge(edgesOnCell(j,iCell))    &
+                                              / dcEdge(edgesOnCell(j,iCell))    & 
+                                             * (hztt(cellsOnCell(j,iCell))-hztt(iCell))
+                  end do
+                  hzt(iCell) = hztt(iCell) + 0.1875*hzt(iCell)
+               end do
+
+               call mpas_dmpar_exch_halo_field(hzt_field)
+
+            end do
+            deallocate(hztt)
+         end if
+
+         do iCell=cellStart,cellEnd
+
+            dhztdtm(iCell) =  dhztdt(iCell)
+            dhztdt (iCell) = (hzt   (iCell) - hztm   (iCell))/(dt*float(ztop_update_interval))
+            dhztdtm(iCell) = (dhztdt(iCell) - dhztdtm(iCell))/(dt*float(ztop_update_interval))
+              
+            do k=kzp,nVertLevels+1
+               zgrid(k,iCell) = zeta_cofw(k)*hzt(iCell) + zw(k)
+            end do
+         
+            do k=kzp,nVertLevels
+               zz (k,iCell) = (zw(k+1)-zw(k))/(zgrid(k+1,iCell)-zgrid(k,iCell))
+            end do
+
+         end do
+
+         levels_z(:,:) = zgrid(:,:)
+
+!!!         do iCell = 1, nCells, 40
+!!!            call mpas_log_write('iCell, hzt, and levels_z(nVertLevels+1,iCell) $i $r $r',     &
+!!!                                intArgs=(/iCell/), realArgs=(/hzt(iCell),levels_z(nVertLevels+1,iCell)/))
+!!!         end do
+
+         do iEdge=edgeStart,edgeEnd
+
+            cell1 = cellsOnEdge(1,iEdge)
+            cell2 = cellsOnEdge(2,iEdge)
+
+            do k=kzp,nVertLevels
+               zxu(k,iEdge)=zeta_coft(k)*(hzt(cell2)-hzt(cell1))/dcEdge(iEdge)
+            end do
+
+         end do
+! 
+!        recalculation z-metric terms in omega eqn.
+!         
+         do iEdge = 1,nEdges
+            cell1 = cellsOnEdge(1,iEdge)
+            cell2 = cellsOnEdge(2,iEdge)
+            if (cell1 <= nCellsSolve .or. cell2 <= nCellsSolve ) then
+
+               do k = 1, nVertLevels
+ 
+                  if (config_theta_adv_order == 2) then
+ 
+                     z_edge = (zgrid(k,cell1)+zgrid(k,cell2))/2.
+
+                  else !theta_adv_order == 3 or 4 
+
+                     d2fdx2_cell1 = deriv_two(1,1,iEdge) * zgrid(k,cell1)
+                     d2fdx2_cell2 = deriv_two(1,2,iEdge) * zgrid(k,cell2)
+                     do i=1, nEdgesOnCell(cell1)
+                        if ( cellsOnCell(i,cell1) > 0)       &
+                        d2fdx2_cell1 = d2fdx2_cell1 + deriv_two(i+1,1,iEdge) * zgrid(k,cellsOnCell(i,cell1)) 
+                     end do
+                     do i=1, nEdgesOnCell(cell2)
+                        if ( cellsOnCell(i,cell2) > 0)       &
+                        d2fdx2_cell2 = d2fdx2_cell2 + deriv_two(i+1,2,iEdge) * zgrid(k,cellsOnCell(i,cell2)) 
+                     end do
+
+                     z_edge =  0.5*(zgrid(k,cell1) + zgrid(k,cell2))         & 
+                                   - (dcEdge(iEdge) **2) * (d2fdx2_cell1 + d2fdx2_cell2) / 12.
+
+                     if (config_theta_adv_order == 3) then
+                        z_edge3 =  - (dcEdge(iEdge) **2) * (d2fdx2_cell1 - d2fdx2_cell2) / 12.
+                     else
+                        z_edge3 = 0.
+                     end if
+
+                  end if
+
+                     zb(k,1,iEdge) = (z_edge-zgrid(k,cell1))*dvEdge(iEdge)/areaCell(cell1) 
+                     zb(k,2,iEdge) = (z_edge-zgrid(k,cell2))*dvEdge(iEdge)/areaCell(cell2)
+                     zb3(k,1,iEdge)=  z_edge3*dvEdge(iEdge)/areaCell(cell1)
+                     zb3(k,2,iEdge)=  z_edge3*dvEdge(iEdge)/areaCell(cell2)
+
+               end do
+
+            end if
+          end do
+
+         do iCell=1,nCells
+            do i=1,nEdgesOnCell(iCell)
+               if (edgesOnCell(i,iCell) <= nEdges) then
+                  if (iCell == cellsOnEdge(1,edgesOnCell(i,iCell))) then
+                     edgesOnCell_sign(i,iCell) = 1.0
+                     zb_cell(:,i,iCell) = zb(:,1,edgesOnCell(i,iCell))
+                     zb3_cell(:,i,iCell) = zb3(:,1,edgesOnCell(i,iCell))
+                  else
+                     edgesOnCell_sign(i,iCell) = -1.0
+                     zb_cell(:,i,iCell) = zb(:,2,edgesOnCell(i,iCell))
+                     zb3_cell(:,i,iCell) = zb3(:,2,edgesOnCell(i,iCell))
+                  end if
+               else
+                  edgesOnCell_sign(i,iCell) = 0.0
+               end if
+            end do
+         end do
+!
+!        recalculate update for diagnostic pressure variables
+!
+         do iCell=cellStart,cellEnd
+            do k=kzp,nVertLevels
+               exner(k,iCell) = (zz(k,iCell)*(rgas/p0)*(rtheta_p(k,iCell)+rtheta_base(k,iCell)))**rcv
+               ! pressure_p is perturbation pressure
+               pressure_p(k,iCell) = zz(k,iCell) * rgas * (exner(k,iCell)*rtheta_p(k,iCell)+rtheta_base(k,iCell)  &
+                                                          * (exner(k,iCell)-exner_base(k,iCell)))
+            end do
+         end do
+
+      end if  !End of adjustment to height of constant p top
+
+!!!JBK
+
+!!!JBK - Diagnostics that can be removed
+      
+            scalar_min = 0.0
+            scalar_max = 0.0
+            do iCell = 1, nCellsSolve
+            do k = 1, nVertLevels
+               scalar_min = min(scalar_min, w(k,iCell))
+               scalar_max = max(scalar_max, w(k,iCell))
+            end do
+            end do
+!            call mpas_dmpar_min_real(domain % dminfo, scalar_min, global_scalar_min)
+!            call mpas_dmpar_max_real(domain % dminfo, scalar_max, global_scalar_max)
+            call mpas_log_write('global min, max w $r $r', realArgs=(/scalar_min, scalar_max/))
+
+            scalar_min =  1000.0
+            scalar_max = -1000.0
+            do iEdge = 1, nEdgesSolve
+            do k = 1, nVertLevels
+               scalar_min = min(scalar_min, u(k,iEdge))
+               scalar_max = max(scalar_max, u(k,iEdge))
+            end do
+            end do
+!            call mpas_dmpar_min_real(domain % dminfo, scalar_min, global_scalar_min)
+!            call mpas_dmpar_max_real(domain % dminfo, scalar_max, global_scalar_max)
+            call mpas_log_write('global min, max u $r $r', realArgs=(/scalar_min, scalar_max/))
+
+            scalar_min = 100000.0
+            scalar_max = 0.0
+            do iCell = 1, nCellsSolve
+            do k = 1, nVertLevels
+               scalar_min = min(scalar_min, theta_m(k,iCell)*exner(k,iCell))
+               scalar_max = max(scalar_max, theta_m(k,iCell)*exner(k,iCell))
+
+!!!          call mpas_log_write('iCell, k, temp, theta, exner = $i $i $r $r $r', intArgs=(/iCell,k/),                                        &
+!!!             realArgs=(/theta_m(k,iCell)*exner(k,iCell),theta_m(k,iCell),exner(k,iCell)/))
+
+            end do
+            end do
+!            call mpas_dmpar_min_real(domain % dminfo, scalar_min, global_scalar_min)
+!            call mpas_dmpar_max_real(domain % dminfo, scalar_max, global_scalar_max)
+             call mpas_log_write('global min, max T $r $r', realArgs=(/scalar_min, scalar_max/))
+
+
+             
+             call mpas_log_write('global min, max HZT $r $r', realArgs=(/minval(hzt(:)), maxval(hzt(:))/))
+
+
+      call mpas_log_write(' *** vertical profile at iCell=1 ***')
+      call mpas_log_write(' k   Z       Temp        Pres        U          W ')
+
+      i = 1
+      do k=1,nVertlevels,4
+          call mpas_log_write('$i $r $r $r $r $r', intArgs=(/k/),                                        &
+             realArgs=(/zgrid(k,i),theta_m(k,i)*exner(k,i),.01*pressure_p(k,i),u(k,i),w(k,i)/))
+      end do
+
+!!!JBK end of diagnostics
+      
+      end if  ! End of update for rk_step=3
+
+!!!JBK - End of added code for rk_step=3
+      
    end subroutine atm_recover_large_step_variables_work
 
 
@@ -4364,7 +4741,8 @@ module atm_time_integration
       integer,           pointer :: config_number_rayleigh_damp_u_levels, config_number_cam_damping_levels
 !!!JBK - Mod for reference sounding
       integer,           pointer :: reference_sounding_switch
-!!!JBK end
+      integer                    :: iCell
+!!!   JBK end
 
       call mpas_pool_get_config(mesh, 'sphere_radius', r_earth)
       call mpas_pool_get_config(configs, 'config_coef_3rd_order', coef_3rd_order)
@@ -4493,6 +4871,23 @@ module atm_time_integration
       call mpas_pool_get_array(mesh, 'cf2', cf2)
       call mpas_pool_get_array(mesh, 'cf3', cf3)
 
+
+!!!JBK call subroutine to compute diurnal heating rate
+
+      if (rk_step == 1) then
+
+         do iCell=cellStart,cellEnd
+
+!           Moved reset of tend_theta_euler to here 
+            tend_theta_euler(1:nVertLevels,iCell) = 0.0
+
+         end do
+
+!        Call to subroutine diurnal_heating_rate moved from subroutine comptue_dyn_tend           
+         call diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt)
+
+      end if
+!!!JBK
       call atm_compute_dyn_tend_work(nCells, nEdges, nVertices, nVertLevels, &
          nCellsSolve, nEdgesSolve, vertexDegree, maxEdges, maxEdges2, num_scalars, moist_start, moist_end, &
          fEdge, dvEdge, dcEdge, invDcEdge, invDvEdge, invAreaCell, invAreaTriangle, meshScalingDel2, meshScalingDel4, &
@@ -4517,8 +4912,7 @@ module atm_time_integration
          cellStart, cellEnd, vertexStart, vertexEnd, edgeStart, edgeEnd, &
          cellSolveStart, cellSolveEnd, vertexSolveStart, vertexSolveEnd, edgeSolveStart, edgeSolveEnd)
 
-   end subroutine atm_compute_dyn_tend
-
+        end subroutine atm_compute_dyn_tend
 
    subroutine atm_compute_dyn_tend_work(nCells, nEdges, nVertices, nVertLevels_dummy, &
       nCellsSolve, nEdgesSolve, vertexDegree, maxEdges_dummy, maxEdges2_dummy, num_scalars_dummy, moist_start, moist_end, &
@@ -4886,7 +5280,11 @@ module atm_time_integration
          k = 2
          wduz(k) =  0.5*( rw(k,cell1)+rw(k,cell2))*(fzm(k)*u(k,iEdge)+fzp(k)*u(k-1,iEdge))
          do k=3,nVertLevels-1
-            wduz(k) = flux3( u(k-2,iEdge),u(k-1,iEdge),u(k,iEdge),u(k+1,iEdge),0.5*(rw(k,cell1)+rw(k,cell2)), 1.0_RKIND )
+
+!!!JBK test for comparison with toy code
+!!!            wduz(k) = flux3( u(k-2,iEdge),u(k-1,iEdge),u(k,iEdge),u(k+1,iEdge),0.5*(rw(k,cell1)+rw(k,cell2)), 1.0_RKIND )
+
+            wduz(k) =  0.5*( rw(k,cell1)+rw(k,cell2))*(fzm(k)*u(k,iEdge)+fzp(k)*u(k-1,iEdge))
          end do
          k = nVertLevels
          wduz(k) =  0.5*( rw(k,cell1)+rw(k,cell2))*(fzm(k)*u(k,iEdge)+fzp(k)*u(k-1,iEdge))
@@ -5263,7 +5661,10 @@ module atm_time_integration
          k = 2
          wdwz(k) =  0.25*(rw(k,icell)+rw(k-1,iCell))*(w(k,iCell)+w(k-1,iCell))
          do k=3,nVertLevels-1
-            wdwz(k) = flux3( w(k-2,iCell),w(k-1,iCell),w(k,iCell),w(k+1,iCell),0.5*(rw(k,iCell)+rw(k-1,iCell)), 1.0_RKIND )
+!!!JBK - Temporary test to compare with toy code
+!!!         wdwz(k) = flux3( w(k-2,iCell),w(k-1,iCell),w(k,iCell),w(k+1,iCell),0.5*(rw(k,iCell)+rw(k-1,iCell)), 1.0_RKIND )
+         wdwz(k) =  0.25*(rw(k,icell)+rw(k-1,iCell))*(w(k,iCell)+w(k-1,iCell))
+!!!JBK
          end do
          k = nVertLevels
          wdwz(k) =  0.25*(rw(k,icell)+rw(k-1,iCell))*(w(k,iCell)+w(k-1,iCell))
@@ -5389,7 +5790,9 @@ module atm_time_integration
          delsq_theta(1:nVertLevels,cellStart:cellEnd) = 0.0
 
          do iCell=cellStart,cellEnd
-            tend_theta_euler(1:nVertLevels,iCell) = 0.0
+!!!JBK      Moved reset of tend_theta_euler to subroutine atm_compute_dyn_tend
+!!!         tend_theta_euler(1:nVertLevels,iCell) = 0.0
+!!!JBK
             r_areaCell = invAreaCell(iCell)
             do i=1,nEdgesOnCell(iCell)
                iEdge = edgesOnCell(i,iCell)
@@ -5525,6 +5928,79 @@ module atm_time_integration
 
    end subroutine atm_compute_dyn_tend_work
 
+!!!JBK  Subroutine to compute the internal heating rate for the diurnal heating test case.                
+
+   subroutine diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt)
+
+      implicit none
+
+      type (mpas_pool_type), intent(in) :: diag
+      type (mpas_pool_type), intent(in) :: mesh
+
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: tend_theta_euler
+      real (kind=RKIND), dimension(:,:), pointer :: zgrid
+      real (kind=RKIND), dimension(:,:), pointer :: rr_save
+      real (kind=RKIND), dimension(:,:), pointer :: exner
+      real (kind=RKIND), dimension(:)  , pointer :: xCell, latCell, lonCell
+      real (kind=RKIND),                 pointer :: ttopb, dttop, tbot, zbot, zsc, omega_dh,time_sec
+
+      integer, intent(in) :: nCells, cellStart, cellEnd, nVertlevels
+      integer             :: iCell, k
+      real (kind=RKIND)   :: xc, xtemp, rate, ttop, tanhz, ztemp, dt
+
+      call mpas_pool_get_array(diag, 'rho_p_save', rr_save)
+      call mpas_pool_get_array(diag, 'exner', exner)
+      call mpas_pool_get_array(mesh, 'xCell', xCell)
+      call mpas_pool_get_array(mesh, 'latCell', latCell)
+      call mpas_pool_get_array(mesh, 'lonCell', lonCell)
+      call mpas_pool_get_array(mesh, 'zgrid', zgrid)
+      call mpas_pool_get_array(mesh, 'ttopb', ttopb)
+      call mpas_pool_get_array(mesh, 'dttop', dttop)
+      call mpas_pool_get_array(mesh, 'tbot', tbot)
+      call mpas_pool_get_array(mesh, 'zbot', zbot)
+      call mpas_pool_get_array(mesh, 'zsc', zsc)
+      call mpas_pool_get_array(mesh, 'omega_dh', omega_dh)
+      call mpas_pool_get_array(mesh, 'time_sec' , time_sec)
+
+      xc = maxval(xCell(:))/2.
+      time_sec = time_sec + dt
+      call mpas_log_write('time, ttopb, dttop, tbot, zbot, zsc, omega_dh, dt = $r $r $r $r $r $r $r $r',     &
+                           realArgs=(/ time_sec,ttopb,dttop,tbot,zbot,zsc,omega_dh,dt /))
+
+      do iCell=cellStart,cellEnd
+
+         xtemp = xCell(iCell)
+
+!!!      ttop for flat plane mesh
+         ttop =  ttopb+dttop*sin(pii*(xtemp-xc)/xc + 2.*pii*time_sec*omega_dh)
+
+!!!      ttop for global mesh
+!!!      ttop =  ttopb+dttop*sin(lonCell(iCell) + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
+!!!      phase_shifted heating on global mesh 
+!!!      ttop =  ttopb+dttop*sin(lonCell(iCell)+pii/6. + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
+
+         do k=1,nVertLevels
+
+            ztemp = .5*(zgrid(k,iCell)+zgrid(k+1,iCell))
+            tanhz = tanh((ztemp-zbot)/zsc)
+
+!!!         heating rate for flat plane mesh
+!!!            rate =  2.*pii*omega_dh*dttop*cos(pii*(xtemp-xc)/xc + 2.*pii*omega_dh*time_sec) 
+
+!!!         heating rate for global mesh
+         rate =  2.*pii*omega_dh*dttop*cos(lonCell(iCell) + 2.*pii*omega_dh*time_sec)*cos(latCell(iCell))
+!!!         phase_shifted heating on global mesh 
+!!!         rate =  2.*pii*omega_dh*dttop*cos(lonCell(iCell)+pii/6. + 2.*pii*omega_dh*time_sec)*cos(latCell(iCell))             
+
+            rate = (rate*tanhz)/(ttop/tbot*(1.-tanhz)+tanhz)**2
+
+            tend_theta_euler(k,iCell) = tend_theta_euler(k,iCell) + rate*rr_save(k,iCell)/exner(k,iCell)
+         end do
+      end do
+
+   end subroutine diurnal_heating_rate
+
+!!!JBK
 
    subroutine atm_compute_solve_diagnostics(dt, state, time_lev, diag, mesh, configs, &
                                             cellStart, cellEnd, vertexStart, vertexEnd, edgeStart, edgeEnd, &

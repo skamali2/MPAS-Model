@@ -250,9 +250,56 @@
                      description="Whether to blend terrain along domain boundaries with first-guess terrain. Only useful for limited-area domains."
                      possible_values="true or false"/>
 
-        </nml_record>
+        <!-- JBK hybrid coordinate **************************************************************************************** -->
 
-        <nml_record name="interpolation_control" in_defaults="true">
+	        <nml_option name="config_hybrid_coordinate"       type="logical"       default_value="false"
+                     units="-"
+                     description="Whether to employ a hybric vertical cooordinate"
+                     possible_values="true or false"/>
+
+		<nml_option name="config_hybrid_top_z"       type="real"       default_value="10000."
+                     units="-"
+                     description="Height at which coordinate surfaces become constant height surfaces"
+                     possible_values="Positive real values"/>
+
+	</nml_record>  -->
+
+        <!-- JBK  const ptop **************************************************************************************** -->
+
+	        <nml_record name="constant_pressure_top" in_defaults="true">
+
+	        <nml_option name="config_const_ptop"       type="logical"       default_value="false"
+                     units="-"
+                     description="Whether to employ a constant pressure top boundary condition"
+                     possible_values="true or false"/>
+
+		<nml_option name="config_coordinate_transition_bottom_z"       type="real"       default_value="10000."
+                     units="-"
+                     description="Height at which coordinate surfaces begin transition toward a constant pressure top boundary"
+                     possible_values="Positive real values"/>
+
+		<nml_option name="config_coefficient_ztop_update"       type="real"       default_value="1."
+                     units="-"
+                     description="Coefficient that restricts the change in ztop each time step"
+                     possible_values="Real values between 0 and 1"/>
+
+		<nml_option name="config_smooth_ztop"       type="integer"       default_value="0"
+                     units="-"
+                     description="Number of smoothing passes applied to ztop each time step"
+                     possible_values="Positive integer values"/>
+
+		<nml_option name="config_ztop_update_interval"       type="integer"       default_value="1"
+                     units="-"
+                     description="Number of time steps between each adjustment of ztop"
+                     possible_values="Positive integer values"/>
+
+	</nml_record>  -->
+
+
+	<!-- **************************************************************************************** -->
+
+
+	<nml_record name="interpolation_control" in_defaults="true">
 
                 <nml_option name="config_extrap_airtemp"        type="character"     default_value="lapse-rate"
                      units="-"
@@ -571,7 +618,39 @@
                         <var name="zb" packages="vertical_stage_out;met_stage_out"/>
                         <var name="zb3" packages="vertical_stage_out;met_stage_out"/>
                         <var name="dss" packages="vertical_stage_out;met_stage_out"/>
-                        <var name="reference_sounding_switch" packages="vertical_stage_out;met_stage_out"/>
+
+	<!-- JBK Hybrid coordinate and const ptop **************************************************************************************** -->
+
+			<var name="hybrid_coordinate" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="hybrid_top_z" packages="vertical_stage_out;met_stage_out"/>
+			<var name="const_ptop" packages="vertical_stage_out;met_stage_out"/>
+	                <var name="kzp" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="coordinate_transition_bottom_z" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="smooth_ztop" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="ztop_update_interval" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="ptlogc" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="hzt" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="dhztdt" packages="vertical_stage_out;met_stage_out"/>
+			<var name="dhztdtm" packages="vertical_stage_out;met_stage_out"/>
+			<var name="coefficient_ztop_update" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="time_sec" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="zeta_coft" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="zeta_cofw" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="zw" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="ttopb" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="dttop" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="tbot" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="zbot" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="zsc" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="omega_dh" packages="vertical_stage_out;met_stage_out"/>
+		        <var name="dragr" packages="vertical_stage_out;met_stage_out"/>
+                        <var name="dragrw" packages="vertical_stage_out;met_stage_out"/>
+			<var name="levels_z" packages="vertical_stage_out;met_stage_out"/>
+
+	<!-- **************************************************************************************** -->
+
+
+			<var name="reference_sounding_switch" packages="vertical_stage_out;met_stage_out"/>
                         <var name="u_init" packages="met_stage_out"/>
                         <var name="v_init" packages="met_stage_out"/>
                         <var name="t_init" packages="met_stage_out"/>
@@ -944,7 +1023,83 @@
                      description="Coefficients for 3rd-order correction to contribution from u to omega diagnosis, edge-oriented"
                      packages="vertical_stage_out;met_stage_out"/>
 
-                <!-- W-Rayleigh damping coefficient -->
+	<!-- JBK Hybrid_coordinate and const ptop **************************************************************************************** -->
+
+		<var name="hybrid_coordinate" type="integer" dimensions="" default_value="0" units="-"
+                     description="Switch between (1) hybrid vertical coordinate and (0) classic terrain-following vertical coorinate"/>
+
+                <var name="hybrid_top_z" type="real" dimensions="" units="m"
+                     description="Height at which coordinate surfaces become constant height surfaces"/>
+
+		<var name="const_ptop" type="integer" dimensions="" default_value="0" units="-"
+                     description="Switch between (1) constant pressure top boundary and (0) a rigid lid"/>
+
+                <var name="kzp" type="integer" dimensions="" units="unitless"
+                     description="k index at the bottom of the coord transform for a constant pressure model top"/>
+
+                <var name="coordinate_transition_bottom_z" type="real" dimensions="" units="m"
+                     description="Height at which coordinate surfaces begin transition toward a constant pressure top boundary"/>
+
+                <var name="smooth_ztop" type="integer" dimensions="" units="unitless"
+                     description="Number of Laplacian smoother passes applied to the height of the model top"/>
+
+                <var name="ztop_update_interval" type="integer" dimensions="" units="unitless"
+                     description="Number of time steps between each adjustment of ztop"/>
+
+                <var name="ptlogc" type="real" dimensions="" units="-"
+                     description="Constant pressure at top of model domain"/>
+
+                <var name="hzt" type="real" dimensions="nCells" units="m"
+                     description="Perturbation height of const pressure model top"/>
+
+                <var name="zeta_coft" type="real" dimensions="nVertLevels" units="unitless"
+                     description="Scaling for upper coordinate transformation at t level"/>
+
+                <var name="zw" type="real" dimensions="nVertLevelsP1" units="m"
+                     description="Nominal height of coordinate surfaces at w levels"/>
+
+                <var name="dhztdt" type="real" dimensions="nCells" units="m/s"
+                     description="Time derivative of height of const pressure model top"/>
+
+                <var name="dhztdtm" type="real" dimensions="nCells" units="m/s2"
+                     description="Second time derivative of height of const pressure model top"/>
+
+                <var name="coefficient_ztop_update" type="real" dimensions="" units="unitless"
+                     description="Coefficient to increment height of const pressure model top"/>
+
+                <var name="time_sec" type="real" dimensions="" units="s"
+                     description="Time in seconds"/>
+
+                <var name="zeta_cofw" type="real" dimensions="nVertLevelsP1" units="unitless"
+                     description="Scaling for upper coordinate transformation at w level"/>
+
+                <var name="ttopb" type="real" dimensions="" units="K"
+                     description="Mean temperature at top of model domain"/>
+
+                <var name="dttop" type="real" dimensions="" units="K"
+                     description="Diurnal temperature perturbation at top of model domain"/>
+
+                <var name="tbot" type="real" dimensions="" units="K"
+                     description="Temperature at bottom of model domain"/>
+
+                <var name="zbot" type="real" dimensions="" units="m"
+                     description="Height at bottom of model domain"/>
+
+                <var name="zsc" type="real" dimensions="" units="n"
+                     description="Thickness of transition zone for initial temperature profile"/>
+
+                <var name="omega_dh" type="real" dimensions="" units="1/t"
+                     description="inverse od seconds in a day"/>
+
+                <var name="dragr" type="real" dimensions="" units="1/s"
+                     description="Rayleigh damping coefficient for horizontal velocity"/>
+
+                <var name="dragrw" type="real" dimensions="" units="1/s"
+                     description="Rayleigh damping coefficient for vertical velocity"/>
+
+	<!-- JBK  ************************************************************************************************** -->
+
+		<!-- W-Rayleigh damping coefficient -->
                 <var name="dss" type="real" dimensions="nVertLevels nCells" units="unitless"
                      description="w-damping coefficient"
                      packages="vertical_stage_out;met_stage_out"/>
@@ -990,7 +1145,7 @@
                      description="Coefficients to reconstruct velocity vectors at cell centers"/>
 
                 <var name="bdyMaskCell" type="integer" dimensions="nCells" default_value="0" units="-"
-                     description="Indicator of whether a cell is an interior cell, a relaxation-zone cell, or a specified-zone cell"/>
+		     description="Indicator of whether a cell is an interior cell, a relaxation-zone cell, or a specified-zone cell"/>
 
                 <var name="bdyMaskEdge" type="integer" dimensions="nEdges" default_value="0" units="-"
                      description="Indicator of whether an edge is an interior edge, a relaxation-zone edge, or a specified-zone edge"/>
@@ -1276,7 +1431,14 @@
                      description="Specific humidity"
                      packages="met_stage_out"/>
 
-                <!-- reconstructed horizontal velocity vectors at cell centers -->
+	<!-- JBK const ptop **************************************************************************************** -->
+
+		<var name="levels_z" type="real" dimensions="nVertLevelsP1 nCells" units="m"
+                     description="Height of coordinate surfaces to be used in plotting routines"/>
+
+	<!-- ******************************************************************************************************* -->
+
+		<!-- reconstructed horizontal velocity vectors at cell centers -->
                 <var name="uReconstructX" type="real" dimensions="nVertLevels nCells Time" units="m s^{-1}"
                      description="Cartesian x-component of reconstructed horizontal velocity at cell centers"
                      packages="met_stage_out"/>

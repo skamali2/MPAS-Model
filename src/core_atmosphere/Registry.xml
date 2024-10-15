@@ -257,10 +257,10 @@
         <nml_record name="damping" in_defaults="true">
                 <nml_option name="config_zd" type="real" default_value="22000.0"
                      units="m"
-                     description="Height MSL to begin w-damping profile"
+		     description="Height MSL to begin w-damping profile"
                      possible_values="Positive real values"/>
 
-                <nml_option name="config_xnutr" type="real" default_value="0.2"
+                <nml_option name="config_xnutr" type="real" default_value="0.1"
                      units="-"
                      description="Maximum w-damping coefficient at model top"
                      possible_values="0 $\leq$ config_xnutr $\leq$ 1"/>
@@ -509,14 +509,39 @@
 			<var name="zb"/>
 			<var name="zb3"/>
 			<var name="dss"/>
+
+                        <var name="const_ptop"/>
+                        <var name="kzp"/>
+                        <var name="smooth_ztop"/>
+                        <var name="ztop_update_interval"/>
+                        <var name="ptlogc"/>
+                        <var name="hzt"/>
+                        <var name="zeta_coft"/>
+                        <var name="zeta_cofw"/>
+			<var name="zw"/>
+			<var name="time_sec"/>
+                        <var name="dhztdt"/>
+                        <var name="dhztdtm"/>
+                        <var name="coefficient_ztop_update"/>
+                        <var name="ttopb"/>
+                        <var name="dttop"/>
+                        <var name="tbot"/>
+                        <var name="zbot"/>
+                        <var name="zsc"/>
+                        <var name="omega_dh"/>
+                        <var name="dragr"/>
+                        <var name="dragrw"/>
+			<var name="levels_z"/>
+			
+			<var name="u_init"/>
+			<var name="v_init"/>
+			<var name="t_init"/>
+			<var name="qv_init"/>
 			<var name="deriv_two"/>
 			<var name="defc_a"/>
 			<var name="defc_b"/>
-<<<<<<< HEAD
 			<var name="coeffs_reconstruct"/>
-=======
 			<var name="reference_sounding_switch"/> 
->>>>>>> 191470911 (Modifications to clean version 8 of MPAS coe:)
 #ifdef MPAS_CAM_DYCORE
 			<var name="cell_gradient_coef_x"/>
 			<var name="cell_gradient_coef_y"/>
@@ -671,6 +696,30 @@
 			<var name="zb"/>
 			<var name="zb3"/>
 			<var name="dss"/>
+
+                        <var name="const_ptop"/>
+                        <var name="kzp"/>
+                        <var name="smooth_ztop"/>
+                        <var name="ztop_update_interval"/>
+                        <var name="ptlogc"/>
+                        <var name="hzt"/>
+                        <var name="zeta_coft"/>
+                        <var name="zeta_cofw"/>
+			<var name="zw"/>
+                        <var name="time_sec"/>
+                        <var name="dhztdt"/>
+                        <var name="dhztdtm"/>
+                        <var name="coefficient_ztop_update"/>
+                        <var name="ttopb"/>
+                        <var name="dttop"/>
+                        <var name="tbot"/>
+                        <var name="zbot"/>
+                        <var name="zsc"/>
+                        <var name="omega_dh"/>
+                        <var name="dragr"/>
+                        <var name="dragrw"/>
+			<var name="levels_z"/>
+			
 			<var name="u_init"/>
 			<var name="v_init"/>
 			<var name="t_init"/>
@@ -1006,7 +1055,8 @@
 			<var name="ke"/>
 			<var name="uReconstructZonal"/>
 			<var name="uReconstructMeridional"/>
-
+                        <var name="levels_z"/>
+			
                         <!-- Begin Ertel PV diagnostics defined in diagnostics/Registry_pv.xml -->
 			<var name="ertel_pv"/>
 			<var name="u_pv"/>
@@ -1488,6 +1538,7 @@
                      description="Surface interpolation weight for level k=3 value"/>
 
                 <!-- description of the vertical grid structure -->
+
                 <var name="zgrid" type="real" dimensions="nVertLevelsP1 nCells" units="m MSL"
                      description="Geometric height of layer interfaces"/>
 
@@ -1535,6 +1586,72 @@
 
                 <var name="zb3_cell" type="real" dimensions="nVertLevelsP1 maxEdges nCells" units="unitless"
                      description="Coefficients for 3rd-order correction to contribution from u to omega diagnosis, cell-oriented"/>
+
+		
+                <!-- Addded variables for constant pressure upper boundary -->
+
+                <var name="const_ptop" type="integer" dimensions="" units="-"
+                     description="-"/>
+
+                <var name="kzp" type="integer" dimensions="" units="-"
+                     description="-"/>
+
+                <var name="smooth_ztop" type="integer" dimensions="" units="-"
+                     description="Number of Laplacian smoother passes on the height of the top boundary"/>
+
+                <var name="ztop_update_interval" type="integer" dimensions="" units="-"
+                     description="Number of time steps between each adjustment of ztop"/>
+
+                <var name="ptlogc" type="real" dimensions="" units="-"
+                     description="-"/>
+
+                <var name="time_sec" type="real" dimensions="" units="-"
+                     description="Time in seconds"/>
+
+                <var name="hzt" type="real" dimensions="nCells" units="m"
+                     description="Time derivative of hzt"/>
+
+                <var name="dhztdt" type="real" dimensions="nCells" units="m/s"
+                     description="-"/>
+
+                <var name="dhztdtm" type="real" dimensions="nCells" units="m/s"
+                     description="-"/>
+
+                <var name="coefficient_ztop_update" type="real" dimensions="" units="-"
+                     description="-"/>
+
+                <var name="zeta_coft" type="real" dimensions="nVertLevels" units="-"
+                     description="-"/>
+
+                <var name="zeta_cofw" type="real" dimensions="nVertLevelsP1" units="-"
+                     description="-"/>
+
+                <var name="zw" type="real" dimensions="nVertLevelsP1" units="m"
+                     description="Nominal height of coordinate surfaces at w levels"/>
+
+                <var name="ttopb" type="real" dimensions="" units="K"
+                     description="Mean Temperature at top of domain"/>
+
+                <var name="dttop" type="real" dimensions="" units="K"
+                     description="Temperature perturbation at top of domain"/>
+
+                <var name="tbot" type="real" dimensions="" units="K"
+                     description="Temperature at bottom of domain"/>
+
+                <var name="zbot" type="real" dimensions="" units="m"
+                     description="Height of bottom of domain"/>
+
+                <var name="zsc" type="real" dimensions="" units="m"
+                     description="Thickness transition in the initial temperature profile"/>
+
+                <var name="omega_dh" type="real" dimensions="" units="1/s"
+                     description="Inverse of number of seconds in a day"/>
+
+                <var name="dragr" type="real" dimensions="" units="1/s"
+                     description="Rayleigh damping coefficient for horizontal velocity"/>
+
+                <var name="dragrw" type="real" dimensions="" units="1/s"
+                     description="Rayleigh damping coefficient for vertical velocity"/>
 
                 <!-- W-Rayleigh damping coefficients -->
                 <var name="dss" type="real" dimensions="nVertLevels nCells" units="unitless"
@@ -1770,6 +1887,9 @@
 
                 <var name="gamma_tri" type="real" dimensions="nVertLevels nCells Time" units="unitless"
                      description="implicit tridiagonal solve coefficients"/>
+
+                <var name="levels_z" type="real" dimensions="nVertLevelsP1 nCells Time" units="m"
+                     description="Height of coordinate surfaces at w levels"/>
 
                 <!-- state variables diagnosed from prognostic state -->
                 <var name="pressure_p" type="real" dimensions="nVertLevels nCells Time" units="Pa"

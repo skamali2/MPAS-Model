@@ -1276,11 +1276,13 @@ module atm_core
       do iCell=1,nCells
          zt = zgrid(nVertLevels+1,iCell)
          do k=1,nVertLevels
-            z = 0.5*(zgrid(k,iCell) + zgrid(k+1,iCell))
+!!!            z = 0.5*(zgrid(k,iCell) + zgrid(k+1,iCell))
+            z = zgrid(k,iCell)
             if (z > config_zd) then
                dss(k,iCell) = config_xnutr*sin(0.5*pii*(z-config_zd)/(zt-config_zd))**2.0
                dss(k,iCell) = dss(k,iCell) / meshDensity(iCell)**(0.25*dx_scale_power)
             end if
+
          end do
       end do
 
