@@ -197,6 +197,11 @@
                      description="Whether to advect scalar fields"
                      possible_values=".true. or .false."/>
 
+                <nml_option name="config_reference_sounding" type="logical" default_value="true"
+                     units="-"
+                     description="Whether a reference sounding is used for thermodynamic variables"
+                     possible_values=".true. or .false."/>
+
                 <nml_option name="config_positive_definite" type="logical" default_value="false" in_defaults="false"
                      units="-"
                      description="Whether to enable positive-definite advection of scalars"
@@ -263,6 +268,26 @@
                      units="-"
                      description="Maximum w-damping coefficient at model top"
                      possible_values="0 $\leq$ config_xnutr $\leq$ 1"/>
+
+                <nml_option name="config_min_coeff" type="real" default_value="0.1"
+                     units="-"
+                     description="Value of epssm below transition zone"
+                     possible_values="Positive real values between 0 and 1"/>
+
+                <nml_option name="config_max_coeff" type="real" default_value="0.1"
+                     units="-"
+                     description="Value of epssm above transition zone"
+                     possible_values="Positive real values between 0 and 1"/>
+
+                <nml_option name="config_transition_lower_bound" type="real" default_value="10000."
+                     units="-"
+                     description="Height MSL of bottom of transition zone for epssm"
+                     possible_values="Positive real values"/>
+
+                <nml_option name="config_transition_upper_bound" type="real" default_value="20000."
+                     units="-"
+                     description="Height MSL of top of transition zone for epssm"
+                     possible_values="Positive real values"/>
 
                 <nml_option name="config_mpas_cam_coef" type="real" default_value="0.0" in_defaults="false"
                      units="-"
@@ -475,6 +500,10 @@
 			<var name="cf3"/>
 			<var name="zgrid"/>
 			<var name="rdzw"/>
+			<var name="etp"/>
+			<var name="etm"/>
+			<var name="ewp"/>
+			<var name="ewm"/>
 			<var name="dzu"/>
 			<var name="rdzu"/>
 			<var name="fzm"/>
@@ -579,6 +608,69 @@
                         immutable="true">
 
 			<stream name="invariant" packages="no_invariant_stream"/>
+			<var name="latCell"/>
+			<var name="lonCell"/>
+			<var name="xCell"/>
+			<var name="yCell"/>
+			<var name="zCell"/>
+			<var name="indexToCellID"/>
+			<var name="latEdge"/>
+			<var name="lonEdge"/>
+			<var name="xEdge"/>
+			<var name="yEdge"/>
+			<var name="zEdge"/>
+			<var name="indexToEdgeID"/>
+			<var name="latVertex"/>
+			<var name="lonVertex"/>
+			<var name="xVertex"/>
+			<var name="yVertex"/>
+			<var name="zVertex"/>
+			<var name="indexToVertexID"/>
+			<var name="cellsOnEdge"/>
+			<var name="nEdgesOnCell"/>
+			<var name="nEdgesOnEdge"/>
+			<var name="edgesOnCell"/>
+			<var name="edgesOnEdge"/>
+			<var name="weightsOnEdge"/>
+			<var name="dvEdge"/>
+			<var name="dcEdge"/>
+			<var name="angleEdge"/>
+			<var name="areaCell"/>
+			<var name="areaTriangle"/>
+			<var name="edgeNormalVectors"/>
+			<var name="localVerticalUnitVectors"/>
+			<var name="cellTangentPlane"/>
+			<var name="cellsOnCell"/>
+			<var name="verticesOnCell"/>
+			<var name="verticesOnEdge"/>
+			<var name="edgesOnVertex"/>
+			<var name="cellsOnVertex"/>
+			<var name="kiteAreasOnVertex"/>
+			<var name="fEdge"/>
+			<var name="fVertex"/>
+			<var name="meshDensity"/>
+			<var name="nominalMinDc"/>
+			<var name="bdyMaskCell"/>
+			<var name="bdyMaskEdge"/>
+			<var name="bdyMaskVertex"/>
+			<var name="cf1"/>
+			<var name="cf2"/>
+			<var name="cf3"/>
+			<var name="zgrid"/>
+			<var name="rdzw"/>
+			<var name="etp"/>
+			<var name="etm"/>
+			<var name="ewp"/>
+			<var name="ewm"/>
+			<var name="dzu"/>
+			<var name="rdzu"/>
+			<var name="fzm"/>
+			<var name="fzp"/>
+			<var name="zxu"/>
+			<var name="zz"/>
+			<var name="zb"/>
+			<var name="zb3"/>
+			<var name="dss"/>
 			<var name="u_init"/>
 			<var name="v_init"/>
 			<var name="t_init"/>
@@ -1397,6 +1489,18 @@
 
                 <var name="rdzw" type="real" dimensions="nVertLevels" units="unitless"
                      description="Reciprocal dzw"/>
+
+                <var name="etp" type="real" dimensions="nVertLevels" units="unitless"
+                     description="coeff for variable epssm"/>
+
+                <var name="etm" type="real" dimensions="nVertLevels" units="unitless"
+                     description="coeff for variable epssm"/>
+
+                <var name="ewp" type="real" dimensions="nVertLevelsP1" units="unitless"
+                     description="coeff for variable epssm"/>
+
+                <var name="ewm" type="real" dimensions="nVertLevelsP1" units="unitless"
+                     description="coeff for variable epssm"/>
 
                 <var name="dzu" type="real" dimensions="nVertLevels" units="unitless"
                      description="d(zeta) at w levels"/>
