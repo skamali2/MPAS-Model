@@ -4887,8 +4887,8 @@ module atm_time_integration
 
 !!!         Call to subroutine diurnal_heating_rate activated for diurnal heating test case
 !!!         global = 0  ! for 2-D diurnal heating on a flat plane
-         global = 1  ! for 3-D diurnal heating on the globe
-         call diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt, global)
+!         global = 1  ! for 3-D diurnal heating on the globe
+!         call diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt, global)
 
       end if
 !!!JBK

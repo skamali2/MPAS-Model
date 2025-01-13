@@ -5527,8 +5527,8 @@ module init_atm_cases
 
       kz = nz
       if (hybrid) then
-      
-         zh = 30000.0
+! SK - Pressure - changed zh from 30000 to 25000  
+         zh = 25000.0
 !         zh = 0.5*zt
 
          do k=1,nz
