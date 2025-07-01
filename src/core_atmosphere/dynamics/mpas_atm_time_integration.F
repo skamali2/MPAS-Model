@@ -2185,10 +2185,10 @@ module atm_time_integration
 !!!JBK-vepssm and reference sounding                                                    
       real (kind=RKIND), dimension(:), pointer :: etp, etm, ewp, ewm
       integer,	      	      	       pointer :: reference_sounding_switch    
-      call mpas_pool_get_array(mesh, 'etp', etp)                                                                                            
-      call mpas_pool_get_array(mesh, 'etm', etm)                                                                                            
-      call mpas_pool_get_array(mesh, 'ewp', ewp)                                                                                            
-      call mpas_pool_get_array(mesh, 'ewm', ewm)                                                                                            
+      call mpas_pool_get_array(mesh, 'etp', etp) 
+      call mpas_pool_get_array(mesh, 'etm', etm) 
+      call mpas_pool_get_array(mesh, 'ewp', ewp) 
+      call mpas_pool_get_array(mesh, 'ewm', ewm) 
       call mpas_pool_get_array(mesh, 'reference_sounding_switch', reference_sounding_switch) 
       call mpas_pool_get_config(configs, 'config_epssm', epssm)
 !!!JBK
@@ -2361,7 +2361,7 @@ module atm_time_integration
 !!!JBK Mod to use full variables and log(p)
       else
          do k=1,nVertLevels
-             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/t(k,iCell)
+             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/(t(k,iCell)*(1.+qtotal))
              cofwt(k,iCell) = 0.
          end do
       end if
@@ -2595,7 +2595,7 @@ module atm_time_integration
                
 !!!         Addition of z_tt*rho term
                
-               w_tend(k,iCell) = w_tend(k,iCell) - zeta_cofw(k)*dhztdtm(iCell)*(fzm(k)*rho_p(k,iCell)+fzp(k)*rho_p(k-1,iCell))
+!!!               w_tend(k,iCell) = w_tend(k,iCell) - zeta_cofw(k)*dhztdtm(iCell)*(fzm(k)*rho_p(k,iCell)+fzp(k)*rho_p(k-1,iCell))
 
 !!             if(iCell.eq.cellSolveEnd/2)  then
 !!                call mpas_log_write('iCell, k, w_tend(k,iCell), zeta_cofw(k), rho_p(k,iCell) = $i $i $r $r $r', intArgs=(/iCell,k/),  &
@@ -2675,14 +2675,13 @@ module atm_time_integration
 
       integer, pointer :: nEdges, nCellsSolve
 
-!!!JBK-vepssm                                                                                                                               
+!!!JBK-vepssm  
       real (kind=RKIND), dimension(:), pointer :: etp, etm, ewp, ewm
-      call mpas_pool_get_array(mesh, 'etp', etp)                                                                                            
-      call mpas_pool_get_array(mesh, 'etm', etm)                                                                                            
-      call mpas_pool_get_array(mesh, 'ewp', ewp)                                                                                            
-      call mpas_pool_get_array(mesh, 'ewm', ewm)                                                                                            
-!!!JBK                                                                                                                                      
-
+      call mpas_pool_get_array(mesh, 'etp', etp) 
+      call mpas_pool_get_array(mesh, 'etm', etm)
+      call mpas_pool_get_array(mesh, 'ewp', ewp) 
+      call mpas_pool_get_array(mesh, 'ewm', ewm)
+!!!JBK 
       call mpas_pool_get_array(mesh, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(mesh, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(mesh, 'nEdgesOnCell', nEdgesOnCell)
@@ -3080,8 +3079,8 @@ module atm_time_integration
 
 !!!JBK      mod to include extra Rayleigh damping
 
-!!!         rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)              ))/(1.0+dts*(dragrw+dss(k,iCell))) 
-            rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)+rw_p(k,iCell)))/(1.0+dts*(dragrw+dss(k,iCell))) 
+            rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)              ))/(1.0+dts*(dragrw+dss(k,iCell))) 
+!!!         rw_p(k,iCell) = (rw_p(k,iCell) - dts*(dragrw+dss(k,iCell))*(rw_save(k,iCell)+rw_p(k,iCell)))/(1.0+dts*(dragrw+dss(k,iCell))) 
  
 !!!JBK
         end do
@@ -3124,6 +3123,8 @@ module atm_time_integration
       !$acc exit data copyout(rtheta_pp_old,ru_p,ruAvg,rho_pp, &
       !$acc                   rtheta_pp,wwAvg,rw_p)
       MPAS_ACC_TIMER_STOP('atm_advance_acoustic_step [ACC_data_xfer]')
+
+      if(small_step ==1)   call mpas_log_write('dragr, dragrw $r $r', realArgs=(/dragr,dragrw/))
 
    end subroutine atm_advance_acoustic_step_work
 
@@ -3443,7 +3444,7 @@ module atm_time_integration
 !!!JBK for const_ptop
       type (field1DReal), pointer                        :: hzt_field
 
-      integer                                            :: kzp, config_theta_adv_order, smooth_ztop, const_ptop, ztop_update_interval, ihzt
+      integer                                            :: kzp, config_theta_adv_order, smooth_ztop, const_ptop, ztop_update_interval, ihzt=0
       real (kind=RKIND)                                  :: ptlogc, coefficient_ztop_update, z_edge, z_edge3, d2fdx2_cell1, d2fdx2_cell2,scalar_min,scalar_max
       real (kind=RKIND), dimension(nCells+1)             :: dhztdt, dhztdtm 
       real (kind=RKIND), dimension(:),     pointer       :: hzt
@@ -3657,6 +3658,9 @@ module atm_time_integration
 !!!   How can this local ihzt parameter be initialized to zero within this subroutine?
       
       ihzt = ihzt + 1
+
+         call mpas_log_write('ihzt = $i', intArgs=(/ihzt/))
+
       if(const_ptop.eq.1.and.ihzt.eq.ztop_update_interval)  then
          ihzt = 0
 
@@ -3667,8 +3671,8 @@ module atm_time_integration
             hztm(iCell) = hzt(iCell)
 
             hzt(iCell) = hzt(iCell)+coefficient_ztop_update*rgas/gravity    &
-                                                *(1.5*alog((pressure_p(nVertLevels  ,iCell)+pressure_b(nVertLevels  ,iCell))/p0) &
-                                                  -.5*alog((pressure_p(nVertLevels-1,iCell)+pressure_b(nVertLevels-1,iCell))/p0)-ptlogc) &
+                                                *(1.5*log((pressure_p(nVertLevels  ,iCell)+pressure_b(nVertLevels  ,iCell))/p0) &
+                                                  -.5*log((pressure_p(nVertLevels-1,iCell)+pressure_b(nVertLevels-1,iCell))/p0)-ptlogc) &
                                                 *(1.5*exner(nVertLevels  ,iCell)*theta_m(nVertLevels  ,iCell)                          &
                                                  - .5*exner(nVertLevels-1,iCell)*theta_m(nVertLevels-1,iCell))
 
@@ -5289,7 +5293,7 @@ module atm_time_integration
       integer,           pointer :: config_number_rayleigh_damp_u_levels, config_number_cam_damping_levels
 !!!JBK - Mod for reference sounding
       integer,           pointer :: reference_sounding_switch
-      integer                    :: iCell
+      integer                    :: iCell, global
 !!!   JBK end
 
       call mpas_pool_get_config(mesh, 'sphere_radius', r_earth)
@@ -5426,13 +5430,15 @@ module atm_time_integration
 
          do iCell=cellStart,cellEnd
 
-!           Moved reset of tend_theta_euler to here 
+!!          Moved reset of tend_theta_euler to here 
             tend_theta_euler(1:nVertLevels,iCell) = 0.0
 
          end do
 
-!        Call to subroutine diurnal_heating_rate moved from subroutine comptue_dyn_tend           
-         call diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt)
+!!!         Call to subroutine diurnal_heating_rate activated for diurnal heating test case
+!!!         global = 0  ! for 2-D diurnal heating on a flat plane
+         global = 1  ! for 3-D diurnal heating on the globe
+         call diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt, global)
 
       end if
 !!!JBK
@@ -5871,7 +5877,7 @@ module atm_time_integration
           else
              do k = 1,nVertLevels
                 dpdz(k,iCell) = -gravity*rr_save(k,iCell)/pp(k,iCell)
-                plog(k,iCell) = alog(pp(k,iCell)/p0)
+                plog(k,iCell) = log(pp(k,iCell)/p0)
              end do
           end if
 !!!JBK end
@@ -5930,9 +5936,9 @@ module atm_time_integration
          do k=3,nVertLevels-1
 
 !!!JBK test for comparison with toy code
-!!!            wduz(k) = flux3( u(k-2,iEdge),u(k-1,iEdge),u(k,iEdge),u(k+1,iEdge),0.5*(rw(k,cell1)+rw(k,cell2)), 1.0_RKIND )
+            wduz(k) = flux3( u(k-2,iEdge),u(k-1,iEdge),u(k,iEdge),u(k+1,iEdge),0.5*(rw(k,cell1)+rw(k,cell2)), 1.0_RKIND )
 
-            wduz(k) =  0.5*( rw(k,cell1)+rw(k,cell2))*(fzm(k)*u(k,iEdge)+fzp(k)*u(k-1,iEdge))
+!!!            wduz(k) =  0.5*( rw(k,cell1)+rw(k,cell2))*(fzm(k)*u(k,iEdge)+fzp(k)*u(k-1,iEdge))
          end do
          k = nVertLevels
          wduz(k) =  0.5*( rw(k,cell1)+rw(k,cell2))*(fzm(k)*u(k,iEdge)+fzp(k)*u(k-1,iEdge))
@@ -6421,8 +6427,8 @@ module atm_time_integration
          !$acc loop vector
          do k=3,nVertLevels-1
 !!!JBK - Temporary test to compare with toy code
-!!!         wdwz(k) = flux3( w(k-2,iCell),w(k-1,iCell),w(k,iCell),w(k+1,iCell),0.5*(rw(k,iCell)+rw(k-1,iCell)), 1.0_RKIND )
-         wdwz(k) =  0.25*(rw(k,icell)+rw(k-1,iCell))*(w(k,iCell)+w(k-1,iCell))
+         wdwz(k) = flux3( w(k-2,iCell),w(k-1,iCell),w(k,iCell),w(k+1,iCell),0.5*(rw(k,iCell)+rw(k-1,iCell)), 1.0_RKIND )
+!!!         wdwz(k) =  0.25*(rw(k,icell)+rw(k-1,iCell))*(w(k,iCell)+w(k-1,iCell))
 !!!JBK
          end do
 
@@ -6796,7 +6802,7 @@ module atm_time_integration
 
 !!!JBK  Subroutine to compute the internal heating rate for the diurnal heating test case.                
 
-   subroutine diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt)
+   subroutine diurnal_heating_rate(mesh, diag, tend_theta_euler, nCells, cellStart, cellEnd, nVertLevels, dt, global)
 
       implicit none
 
@@ -6811,7 +6817,7 @@ module atm_time_integration
       real (kind=RKIND),                 pointer :: ttopb, dttop, tbot, zbot, zsc, omega_dh,time_sec
 
       integer, intent(in) :: nCells, cellStart, cellEnd, nVertlevels
-      integer             :: iCell, k
+      integer             :: iCell, k, global
       real (kind=RKIND)   :: xc, xtemp, rate, ttop, tanhz, ztemp, dt
 
       call mpas_pool_get_array(diag, 'rho_p_save', rr_save)
@@ -6837,29 +6843,32 @@ module atm_time_integration
 
          xtemp = xCell(iCell)
 
-!!!      ttop for flat plane mesh
-!!!         ttop =  ttopb+dttop*sin(pii*(xtemp-xc)/xc + 2.*pii*time_sec*omega_dh)
-
-!!!      ttop for global mesh
-      ttop =  ttopb+dttop*sin(lonCell(iCell) + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
-!!!      phase_shifted heating on global mesh 
-!!!      ttop =  ttopb+dttop*sin(lonCell(iCell)+pii/6. + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
-
+         if(global.eq.0)  then
+!!!         ttop for flat plane mesh
+            ttop =  ttopb+dttop*sin(pii*(xtemp-xc)/xc + 2.*pii*time_sec*omega_dh)
+         else
+!!!         ttop for global mesh
+            ttop =  ttopb+dttop*sin(lonCell(iCell) + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
+!!!         phase_shifted heating on global mesh 
+!!!        ttop =  ttopb+dttop*sin(lonCell(iCell)+pii/6. + 2.*pii*time_sec*omega_dh)*cos(latCell(iCell))
+         end if
+         
          do k=1,nVertLevels
 
             ztemp = .5*(zgrid(k,iCell)+zgrid(k+1,iCell))
             tanhz = tanh((ztemp-zbot)/zsc)
 
-!!!         heating rate for flat plane mesh
-!!!            rate =  2.*pii*omega_dh*dttop*cos(pii*(xtemp-xc)/xc + 2.*pii*omega_dh*time_sec) 
-
-!!!         heating rate for global mesh
-         rate =  2.*pii*omega_dh*dttop*cos(lonCell(iCell) + 2.*pii*omega_dh*time_sec)*cos(latCell(iCell))
-!!!         phase_shifted heating on global mesh 
-!!!         rate =  2.*pii*omega_dh*dttop*cos(lonCell(iCell)+pii/6. + 2.*pii*omega_dh*time_sec)*cos(latCell(iCell))             
-
+            if(global.eq.0)  then
+!!!            heating rate for flat plane mesh
+               rate =  2.*pii*omega_dh*dttop*cos(pii*(xtemp-xc)/xc + 2.*pii*omega_dh*time_sec) 
+            else
+!!!            heating rate for global mesh
+               rate =  2.*pii*omega_dh*dttop*cos(lonCell(iCell) + 2.*pii*omega_dh*time_sec)*cos(latCell(iCell))
+!!!            phase_shifted heating on global mesh 
+!!!            rate =  2.*pii*omega_dh*dttop*cos(lonCell(iCell)+pii/6. + 2.*pii*omega_dh*time_sec)*cos(latCell(iCell))             
+            end if
+            
             rate = (rate*tanhz)/(ttop/tbot*(1.-tanhz)+tanhz)**2
-
             tend_theta_euler(k,iCell) = tend_theta_euler(k,iCell) + rate*rr_save(k,iCell)/exner(k,iCell)
          end do
       end do
