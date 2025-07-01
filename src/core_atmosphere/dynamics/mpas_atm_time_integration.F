@@ -2347,13 +2347,7 @@ module atm_time_integration
 !!!JBK
          do k=1,nVertLevels
 
-!            qtotal = 0.
-!            do iq = moist_start, moist_end
-!               qtotal = qtotal + scalars(iq, k, iCell)
-!            end do
-            qtotal = qtot(k,iCell)
-
-            cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity*rb(k,iCell)/(1.+qtotal)  &                                                              
+            cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity*rb(k,iCell)/(1.+qtot(k,iCell))  &                                                              
                                 *p(k,iCell)/((rtb(k,iCell)+rt(k,iCell))*pb(k,iCell))                                                            
 
 !            cofwt(k,iCell) = 0.
@@ -2361,7 +2355,7 @@ module atm_time_integration
 !!!JBK Mod to use full variables and log(p)
       else
          do k=1,nVertLevels
-             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/(t(k,iCell)*(1.+qtotal))
+!             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/(t(k,iCell)*(1.+qtot(k,iCell)))
              cofwt(k,iCell) = 0.
          end do
       end if
@@ -3126,6 +3120,12 @@ module atm_time_integration
 
       if(small_step ==1)   call mpas_log_write('dragr, dragrw $r $r', realArgs=(/dragr,dragrw/))
 
+!!!JBK
+      if(small_step ==1)  then
+         k = nVertLevels
+         call mpas_log_write(' k, z, dss, dts $i $r $r $r', intArgs=(/k/), realArgs=(/zgrid(k,1),dss(k,1),dts/))
+      end if
+!!!JBK
    end subroutine atm_advance_acoustic_step_work
 
 
@@ -3617,7 +3617,7 @@ module atm_time_integration
 
          !DIR$ IVDEP
          do k = 2, nVertLevels
-           w(k,iCell) = w(k,iCell)/(fzm(k)*rho_zz(k,iCell)+fzp(k)*rho_zz(k-1,iCell))  &
+           w(k,iCell) = w(k,iCell)/(fzm(k)*rho_zz(k,iCell)+fzp(k)*rho_zz(k-1,iCell))   &
 !!!JBK - for const_ptop
                             +zeta_cofw(k)*dhztdt(iCell)
          end do
@@ -3649,8 +3649,8 @@ module atm_time_integration
 
       if (rk_step == 3) then
       
-         call mpas_log_write('const_ptop, smooth_ztop, ztop_update_interval, coefficient_ztop_update $i $i $i $r',     &
-                      intArgs=(/const_ptop,smooth_ztop,ztop_update_interval/), realArgs=(/coefficient_ztop_update/))
+         call mpas_log_write('const_ptop, smooth_ztop, ztop_update_interval, kzp, coefficient_ztop_update $i $i $i $i $r',     &
+                      intArgs=(/const_ptop,smooth_ztop,ztop_update_interval,kzp/), realArgs=(/coefficient_ztop_update/))
 
 !!!   
 !!!   call mpas_log_write('dcEdge at iEdge = 1-6 = $r $r $r $r $r $r',realArgs=(/dcEdge(1),dcEdge(2),dcEdge(3),dcEdge(4),dcEdge(5),dcEdge(6)/))
@@ -3664,7 +3664,7 @@ module atm_time_integration
       if(const_ptop.eq.1.and.ihzt.eq.ztop_update_interval)  then
          ihzt = 0
 
-      call mpas_log_write('min and max values of hzt = $r $r', realArgs=(/minval(hzt(:)),maxval(hzt(:))/))
+         call mpas_log_write('min and max values of hzt = $r $r', realArgs=(/minval(hzt(:)),maxval(hzt(:))/))
          
          do iCell=cellStart,cellEnd
 
@@ -3680,6 +3680,11 @@ module atm_time_integration
 
          end do
 
+!!!   JBK  Patch to gradually increase coefficient_ztop_update
+!         coefficient_ztop_update = min(1.,.05 + coefficient_ztop_update)
+         call mpas_log_write('coefficient_ztop_update, $r',  realArgs=(/coefficient_ztop_update/))
+!!!  JBK
+         
          if(smooth_ztop.gt.0)  then
 
             allocate(hztt(nCells+1))
@@ -3723,6 +3728,9 @@ module atm_time_integration
               
             do k=kzp,nVertLevels+1
                zgrid(k,iCell) = zeta_cofw(k)*hzt(iCell) + zw(k)
+
+!!!             if(iCell.eq.1) call mpas_log_write('diag, $i $r $r $r $r', intArgs=(/k/), realArgs=(/hzt(iCell),zgrid(k,iCell),zeta_cofw(k),zw(k)/))
+
             end do
          
             do k=kzp,nVertLevels
@@ -3737,7 +3745,7 @@ module atm_time_integration
 !!!            call mpas_log_write('iCell, hzt, and levels_z(nVertLevels+1,iCell) $i $r $r',     &
 !!!                                intArgs=(/iCell/), realArgs=(/hzt(iCell),levels_z(nVertLevels+1,iCell)/))
 !!!         end do
-
+         
          do iEdge=edgeStart,edgeEnd
 
             cell1 = cellsOnEdge(1,iEdge)
@@ -3794,7 +3802,7 @@ module atm_time_integration
                end do
 
             end if
-          end do
+         end do
 
          do iCell=1,nCells
             do i=1,nEdgesOnCell(iCell)
@@ -5794,8 +5802,9 @@ module atm_time_integration
                !
                !$acc loop vector
                do k = nVertLevels-config_number_cam_damping_levels + 1, nVertLevels
-                  visc2cam = 4.0*2.0833*config_len_disp*config_mpas_cam_coef
-                  visc2cam = visc2cam*(1.0-real(nVertLevels-k)/real(config_number_cam_damping_levels))
+!!!                  visc2cam = 4.0*2.0833*config_len_disp*config_mpas_cam_coef
+                  visc2cam = visc2cam*sin(1.5708*real(k-(nVertLevels-config_number_cam_damping_levels))/real(config_number_cam_damping_levels))
+!!!                  kdiff(k  ,iCell) = max(kdiff(nVertLevels  ,iCell),visc2cam)
                   kdiff(k  ,iCell) = max(kdiff(k  ,iCell),visc2cam)
                end do
             end do
@@ -8578,6 +8587,9 @@ module atm_time_integration
        real (kind=RKIND), dimension(:), pointer :: latEdge
        real (kind=RKIND), dimension(:), pointer :: lonEdge
        integer, dimension(:), pointer :: indexToCellID
+!!!JBK
+       real (kind=RKIND), dimension(:), pointer :: hzt
+!!!
        integer :: indexMax, indexMax_global
        integer :: kMax, kMax_global
        integer :: offset_1d ! Offset into a multi-dimensional array, as if it were a contiguous 1-d array
@@ -8635,6 +8647,12 @@ module atm_time_integration
          call mpas_pool_get_array(mesh, 'lonEdge', lonEdge)
 
          allocate(spd(nVertLevels,nEdgesSolve))
+!!!JBK
+         call mpas_pool_get_array(mesh, 'hzt', hzt)
+!!!
+         call mpas_pool_get_dimension(state, 'nCellsSolve', nCellsSolve)
+         call mpas_pool_get_dimension(state, 'nEdgesSolve', nEdgesSolve)
+         call mpas_pool_get_dimension(state, 'nVertLevels', nVertLevels)
 
          scalar_min = 1.0e20
          offset_1d = huge(1)
@@ -8884,7 +8902,68 @@ module atm_time_integration
          ! format statement should be '(a,f9.4,a,i4,a,f7.3,a,f8.3,a)'
          call mpas_log_write(' global max wsp: $r k=$i, $r lat, $r lon', intArgs=(/kMax_global/), &
                              realArgs=(/global_scalar_max, latMax_global, lonMax_global/))
+!!!   JBK min and max hzt
+                             
+         scalar_min = 1.0e20
+         indexMax = -1
+         latMax = 0.0
+         lonMax = 0.0
+         do iCell = 1, nCellsSolve
+            if (hzt(iCell) < scalar_min) then
+               scalar_min = hzt(iCell)
+               indexMax   = iCell
+               latMax     = latCell(iCell)
+               lonMax     = lonCell(iCell)
+            end if
+         end do
+         localVals(1) = scalar_min
+         localVals(2) = real(indexMax,kind=RKIND)
+         localVals(4) = latMax
+         localVals(5) = lonMax
+         call mpas_dmpar_minattributes_real(domain % dminfo, scalar_min, localVals, globalVals)
+         global_scalar_min = globalVals(1)
+         indexMax_global = int(globalVals(2))
+         latMax_global = globalVals(4)
+         lonMax_global = globalVals(5)
+         latMax_global = latMax_global * 180.0_RKIND / pi_const
+         lonMax_global = lonMax_global * 180.0_RKIND / pi_const
+         if (lonMax_global > 180.0) then
+            lonMax_global = lonMax_global - 360.0
+         end if
+         ! format statement should be '(a,f9.4,a,i4,a,f7.3,a,f8.3,a)'
+         call mpas_log_write(' global min hzt: $r $r lat, $r lon',  &
+                             realArgs=(/global_scalar_min, latMax_global, lonMax_global/))
 
+         scalar_max = -1.0e20
+         indexMax = -1
+         latMax = 0.0
+         lonMax = 0.0
+         do iCell = 1, nCellsSolve
+            if (hzt(iCell) > scalar_max) then
+               scalar_max = hzt(iCell)
+               indexMax = iCell
+               latMax = latCell(iCell)
+               lonMax = lonCell(iCell)
+            end if
+         end do
+         localVals(1) = scalar_max
+         localVals(2) = real(indexMax,kind=RKIND)
+         localVals(4) = latMax
+         localVals(5) = lonMax
+         call mpas_dmpar_maxattributes_real(domain % dminfo, scalar_max, localVals, globalVals)
+         global_scalar_max = globalVals(1)
+         indexMax_global = int(globalVals(2))
+         latMax_global = globalVals(4)
+         lonMax_global = globalVals(5)
+         latMax_global = latMax_global * 180.0_RKIND / pi_const
+         lonMax_global = lonMax_global * 180.0_RKIND / pi_const
+         if (lonMax_global > 180.0) then
+            lonMax_global = lonMax_global - 360.0
+         end if
+         ! format statement should be '(a,f9.4,a,i4,a,f7.3,a,f8.3,a)'
+         call mpas_log_write(' global max hzt: $r $r lat, $r lon', &
+                             realArgs=(/global_scalar_max, latMax_global, lonMax_global/))
+!!!JBK
          !
          ! Check for NaNs
          !

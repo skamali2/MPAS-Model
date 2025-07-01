@@ -1296,7 +1296,10 @@ module atm_core
                dss(k,iCell) = config_xnutr*sin(0.5*pii*(z-config_zd)/(zt-config_zd))**2.0
                dss(k,iCell) = dss(k,iCell) / meshDensity(iCell)**(0.25*dx_scale_power)
             end if
-
+!!! JBK
+            if(iCell.eq.1)  call mpas_log_write(' k, z, dss, zd, xnutr, meshdensity $i $r $r $r $r $r',  &
+                           intArgs=(/k/), realArgs=(/z,dss(k,iCell),config_zd,config_xnutr,meshDensity(iCell)/))
+!!! JBK
          end do
       end do
 

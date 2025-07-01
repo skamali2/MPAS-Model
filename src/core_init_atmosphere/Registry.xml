@@ -288,6 +288,26 @@
                      description="Whether to employ a constant pressure top boundary condition"
                      possible_values="true or false"/>
 
+		<nml_option name="config_top_pressure"       type="real"       default_value="10."
+                     units="Pascals"
+                     description="Pressure at top boundary when config_const_ptop id true"
+                     possible_values="Real values > 0 and < 100000."/>
+
+		<nml_option name="config_ptop_iterations"       type="integer"       default_value="1"
+                     units="-"
+                     description="Number of iterations for initialization toward a constant pressure top boundary"
+                     possible_values="Positive integer values"/>
+
+		<nml_option name="config_init_ztop_update"       type="real"       default_value="1."
+                     units="-"
+                     description="Coefficient that restricts the change in ztop each iteration in initialization"
+                     possible_values="Real values between 0 and 1"/>
+
+		<nml_option name="kzp"       type="integer"       default_value="1"
+                     units="-"
+                     description="k index at which coordinate surfaces begin transition toward a constant pressure top boundary"
+                     possible_values="Positive integer values"/>
+
 		<nml_option name="config_coordinate_transition_bottom_z"       type="real"       default_value="10000."
                      units="-"
                      description="Height at which coordinate surfaces begin transition toward a constant pressure top boundary"
@@ -668,6 +688,9 @@
 		        <var name="dragr" packages="vertical_stage_out;met_stage_out"/>
                         <var name="dragrw" packages="vertical_stage_out;met_stage_out"/>
 			<var name="levels_z" packages="vertical_stage_out;met_stage_out"/>
+			<var name="pressure" packages="vertical_stage_out;met_stage_out"/>
+			<var name="z_fg" packages="vertical_stage_out;met_stage_out"/>
+			<var name="p_fg" packages="vertical_stage_out;met_stage_out"/>
 
 	<!-- **************************************************************************************** -->
 
