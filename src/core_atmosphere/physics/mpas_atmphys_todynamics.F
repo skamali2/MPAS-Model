@@ -13,7 +13,6 @@
  use mpas_atm_dimensions
 
  use mpas_atmphys_constants, only: R_d,R_v,degrad
-
  implicit none
  private
  public:: physics_get_tend
@@ -324,7 +323,7 @@
 !-----------------------------------------------------------------------------------------------------------------
 
 !add coupled tendencies due to PBL processes:
- if(pbl_scheme .ne. 'off') then
+    if(pbl_scheme .ne. 'off') then
     if(rk_step == 1 .and. dynamics_substep == 1) then
        call exchange_halo_group(block%domain,'physics:blten')
        call tend_toEdges(block,mesh,rublten,rvblten,rublten_Edge)

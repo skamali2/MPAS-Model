@@ -7326,7 +7326,10 @@ module init_atm_cases
             t2m(:) = t_fg(k,:)
             rh2(:) = rh_fg(k,:)
             do iCell = 1, nCells
-               es = svp1 * 10.0_RKIND * exp(svp2 * (t2m(iCell)-svpt0) / (t2m(iCell)-svp3))
+!!! JBK  Mod to limit the denominator in es
+!!!            es = svp1 * 10.0_RKIND * exp(svp2 * (t2m(iCell)-svpt0) / (t2m(iCell)-svp3))
+               es = svp1 * 10.0_RKIND * exp(svp2 * (t2m(iCell)-svpt0) / max(1.,(t2m(iCell)-svp3)))
+!!! JBK End mod
                es = min(es, 0.99_RKIND * 0.01_RKIND * psfc(iCell))
                rs = 0.622_RKIND * es * 100.0_RKIND / (psfc(iCell) - es * 100.0_RKIND)
                q2(iCell) = 0.01_RKIND * rs * rh2(iCell)
@@ -7834,7 +7837,10 @@ call mpas_log_write('Done with soil consistency check')
       do iCell=1,nCells
 
          ! Q2
-         es = 6.112 * exp((17.27*(t2m(iCell) - 273.16))/(t2m(iCell) - 35.86))
+!!! JBK Mod to limit denominator
+!!!         es = 6.112 * exp((17.27*(t2m(iCell) - 273.16))/(t2m(iCell) - 35.86))
+         es = 6.112 * exp((17.27*(t2m(iCell) - 273.16))/max(1.,(t2m(iCell) - 35.86)))
+!!! JBK End mod
          rs = 0.622 * es * 100. / (psfc(iCell) - es * 100.)
          q2(iCell) = 0.01 * rs * rh2(iCell)
     

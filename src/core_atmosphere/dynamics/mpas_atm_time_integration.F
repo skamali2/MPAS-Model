@@ -1074,9 +1074,9 @@ module atm_time_integration
                                               edgeSolveThreadStart(thread), edgeSolveThreadEnd(thread))
       end do
 !$OMP END PARALLEL DO
-
+!!!
       call mpas_timer_stop('atm_compute_moist_coefficients')
-
+!!!
 #ifdef DO_PHYSICS
       call mpas_timer_start('physics_get_tend')
       rk_step = 1
@@ -1206,13 +1206,18 @@ module atm_time_integration
             call exchange_halo_group(domain, 'dynamics:tend_u')
    
             call mpas_timer_start('small_step_prep')
-   
+            
 !$OMP PARALLEL DO
             do thread=1,nThreads
-               call atm_set_smlstep_pert_variables( tend, mesh, &
-                                          cellSolveThreadStart(thread), cellSolveThreadEnd(thread))
+!               call atm_set_smlstep_pert_variables( tend, mesh, &
+!                                          cellSolveThreadStart(thread), cellSolveThreadEnd(thread))
+                call atm_set_smlstep_pert_variables( tend, diag, mesh, block % configs, &
+                                          cellThreadStart(thread), cellThreadEnd(thread), &
+                                          edgeThreadStart(thread), edgeThreadEnd(thread), &
+                                          cellSolveThreadStart(thread), cellSolveThreadEnd(thread), &
+                                          edgeSolveThreadStart(thread), edgeSolveThreadEnd(thread))
             end do
-!$OMP END PARALLEL DO
+!     $OMP END PARALLEL DO      
             call mpas_timer_stop('small_step_prep')
 
           
@@ -1985,7 +1990,7 @@ module atm_time_integration
       !$acc            copyin(ru, rw, rtheta_p, rho_p, u_1, w_1, theta_m_1, &
       !$acc                   rho_zz_1, scalars_1)
       MPAS_ACC_TIMER_STOP('atm_rk_integration_setup [ACC_data_xfer]')
-
+      
       !$acc kernels
       theta_m_2(:,cellEnd+1) = 0.0_RKIND
       !$acc end kernels
@@ -2093,6 +2098,7 @@ module atm_time_integration
       !$acc            copyin(scalars)
       MPAS_ACC_TIMER_STOP('atm_compute_moist_coefficients [ACC_data_xfer]')
 
+      
       !$acc parallel default(present)
       !$acc loop gang worker
 !      do iCell = cellSolveStart,cellSolveEnd
@@ -2334,29 +2340,39 @@ module atm_time_integration
 !DIR$ IVDEP
          !$acc loop vector
          do k=2,nVertLevels
-            cofwz(k,iCell) = c2*(fzm(k)*zz(k,iCell)+fzp(k)*zz(k-1,iCell))  &                                                                    
-                 *rdzu(k)*cqw(k,iCell)*(fzm(k)*p (k,iCell)+fzp(k)*p (k-1,iCell))                                                                
+            cofwz(k,iCell) = c2*(fzm(k)*zz(k,iCell)+fzp(k)*zz(k-1,iCell))  &            
+                               *rdzu(k)*cqw(k,iCell)*(fzm(k)*p (k,iCell)+fzp(k)*p (k-1,iCell))
+            
             coftz(k,iCell) = (fzm(k)*t (k,iCell)+fzp(k)*t (k-1,iCell))
          end do
          coftz(nVertLevels+1,iCell) = 0.0
-!DIR$ IVDEP
-         !$acc loop vector
 
 !!!JBK Mod to use either reference sounding or full variables and log(p)
        if(reference_sounding_switch.eq.1)  then
 !!!JBK
+!DIR$ IVDEP
+         !$acc loop vector
          do k=1,nVertLevels
 
-            cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity*rb(k,iCell)/(1.+qtot(k,iCell))  &                                                              
-                                *p(k,iCell)/((rtb(k,iCell)+rt(k,iCell))*pb(k,iCell))                                                            
+!!!            cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity*rb(k,iCell)/(1.+qtot(k,iCell))  &
+!!!            *p(k,iCell)/((rtb(k,iCell)+rt(k,iCell))*pb(k,iCell))
 
-!            cofwt(k,iCell) = 0.
+             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/(t(k,iCell)*(1.+qtot(k,iCell)))
+            
+!!!JBK cofwt turned off for test
+!     cofwt(k,iCell) = 0.
+!!!
          end do
-!!!JBK Mod to use full variables and log(p)
+
+!!!   JBK Mod to use full variables and log(p)
       else
+!DIR$ IVDEP
+         !$acc loop vector
          do k=1,nVertLevels
-!             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/(t(k,iCell)*(1.+qtot(k,iCell)))
-             cofwt(k,iCell) = 0.
+             cofwt(k,iCell) = .5*rcv*zz(k,iCell)*gravity/(t(k,iCell)*(1.+qtot(k,iCell)))
+!!!   JBK mod to turn off cofwt
+!     cofwt(k,iCell) = 0.
+!!!
          end do
       end if
 !!!JBK end
@@ -2408,7 +2424,10 @@ module atm_time_integration
    end subroutine atm_compute_vert_imp_coefs_work
 
 
-   subroutine atm_set_smlstep_pert_variables( tend, mesh, cellSolveStart, cellSolveEnd)
+!  subroutine atm_set_smlstep_pert_variables( tend, mesh, cellSolveStart, cellSolveEnd)
+   subroutine atm_set_smlstep_pert_variables ( tend, diag, mesh, configs, &
+                                   cellStart, cellEnd, edgeStart, edgeEnd, &
+                                   cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd)
 
       ! following Klemp et al MWR 2007, we use preturbation variables
       ! in the acoustic-step integration.  This routine computes those 
@@ -2419,6 +2438,7 @@ module atm_time_integration
       implicit none
 
       type (mpas_pool_type), intent(inout) :: tend
+      type (mpas_pool_type), intent(inout) :: diag
       type (mpas_pool_type), intent(inout) :: mesh
       type (mpas_pool_type), intent(in) :: configs
       integer, intent(in) :: cellStart, cellEnd, edgeStart, edgeEnd
@@ -2435,10 +2455,14 @@ module atm_time_integration
       integer, dimension(:), pointer :: bdyMaskCell  ! regional_MPAS
 
       real (kind=RKIND), dimension(:), pointer :: fzm, fzp
+      real (kind=RKIND), dimension(:,:), pointer :: ruAvg, wwAvg
       real (kind=RKIND), dimension(:,:,:), pointer :: zb, zb3, zb_cell, zb3_cell
       real (kind=RKIND), dimension(:,:), pointer :: zz
-
       real (kind=RKIND), dimension(:,:), pointer :: w_tend, u_tend
+       real (kind=RKIND), dimension(:,:), pointer :: rho_pp, rho_p_save, rho_p
+      real (kind=RKIND), dimension(:,:), pointer :: ru_p, ru, ru_save
+      real (kind=RKIND), dimension(:,:), pointer :: rtheta_pp, rtheta_p_save, rtheta_p, rtheta_pp_old
+      real (kind=RKIND), dimension(:,:), pointer :: rw_p, rw_save, rw
 
       call mpas_pool_get_dimension(mesh, 'nCells', nCells)
       call mpas_pool_get_dimension(mesh, 'nEdges', nEdges)
@@ -2487,34 +2511,30 @@ module atm_time_integration
       call mpas_pool_get_array(diag, 'rw_p', rw_p)
       call mpas_pool_get_array(diag, 'rw_save', rw_save)
       call mpas_pool_get_array(diag, 'rw', rw)
-
-      call atm_set_smlstep_pert_variables_work(nCells, nEdges, nCellsSolve, &
-                                   nEdgesOnCell, cellsOnEdge, edgesOnCell, fzm, fzp, ruAvg, wwAvg, zb, zb3, zb_cell, zb3_cell, &
-                                   zz, w_tend, u_tend, rho_pp, rho_p_save, rho_p, ru_p, ru, ru_save, &
-                                   rtheta_pp, rtheta_p_save, rtheta_p, rtheta_pp_old, rw_p, rw_save, rw, &
+!!!JBK-merge
+      call atm_set_smlstep_pert_variables_work(nCells, nEdges, &
+                                   nEdgesOnCell, cellsOnEdge, edgesOnCell, edgesOnCell_sign, bdyMaskCell, &          
+                                   fzm, fzp, zb, zb3, zb_cell, zb3_cell, zz, &                                       
+                                   w_tend, u_tend, &
 !!!JBK
                                    const_ptop, kzp, zeta_cofw, dhztdtm,    &
 !!!JBK                                   
-                                   bdyMaskCell, &  ! added for regional_MPAS
-                                   edgesOnCell_sign, &
-                                   cellStart, cellEnd, edgeStart, edgeEnd, &
-                                   cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd)
-
-
+                                   cellSolveStart, cellSolveEnd)
+!!!JBK-end-merge
+                                   
    end subroutine atm_set_smlstep_pert_variables
 
-   subroutine atm_set_smlstep_pert_variables_work(nCells, nEdges, nCellsSolve, &
-                                   nEdgesOnCell, cellsOnEdge, edgesOnCell, fzm, fzp, ruAvg, wwAvg, zb, zb3, zb_cell, zb3_cell, &
-                                   zz, w_tend, u_tend, rho_pp, rho_p_save, rho_p, ru_p, ru, ru_save, &
-                                   rtheta_pp, rtheta_p_save, rtheta_p, rtheta_pp_old, rw_p, rw_save, rw, &
+!!!JBK-merge
+   subroutine atm_set_smlstep_pert_variables_work(nCells, nEdges, &
+                                   nEdgesOnCell, cellsOnEdge, edgesOnCell, edgesOnCell_sign, bdyMaskCell, &          
+                                   fzm, fzp, zb, zb3, zb_cell, zb3_cell, zz, &                                       
+                                   w_tend, u_tend, &
 !!!JBK
                                    const_ptop, kzp, zeta_cofw, dhztdtm,    &
 !!!JBK                                   
-                                   bdyMaskCell, & ! added for regional_MPAS
-                                   edgesOnCell_sign, &
-                                   cellStart, cellEnd, edgeStart, edgeEnd, &
-                                   cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd)
-
+                                   cellSolveStart, cellSolveEnd)
+!!!   JBK-end-merge
+                                   
       use mpas_atm_dimensions
 
       implicit none
@@ -2523,33 +2543,51 @@ module atm_time_integration
       !
       ! Dummy arguments
       !
+!! WCS PTF: moved dimension declarations so they are declared before being used 
+      integer, intent(in) :: nCells, nEdges
+      integer, intent(in) :: cellSolveStart, cellSolveEnd
 !!!JBK
       integer, intent(in)                         :: const_ptop, kzp
       real (kind=RKIND), dimension(nVertLevels+1) :: zeta_cofw
       real (kind=RKIND), dimension(nCells+1)      :: dhztdtm
 !!!JBK
-      integer, intent(in) :: nCells, nEdges, nCellsSolve
-      integer, intent(in) :: cellStart, cellEnd, edgeStart, edgeEnd
-      integer, intent(in) :: cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd
-
+!!!JBK-merged
+!      integer, intent(in) :: nCells, nEdges, nCellsSolve
+!      integer, intent(in) :: cellStart, cellEnd, edgeStart, edgeEnd
+!      integer, intent(in) :: cellSolveStart, cellSolveEnd, edgeSolveStart, edgeSolveEnd
+!      integer, intent(in) :: nCells, nEdges
+!      integer, intent(in) :: cellSolveStart, cellSolveEnd
+!!!JBK-end
       integer, dimension(nCells+1) :: nEdgesOnCell
       integer, dimension(2,nEdges+1) :: cellsOnEdge
       integer, dimension(maxEdges,nCells+1) :: edgesOnCell
-      real (kind=RKIND), dimension(maxEdges,nCells+1) :: edgesOnCell_sign
-      integer, dimension(nCells+1), intent(in) :: bdyMaskCell  !  added for regional_MPAS
-
       real (kind=RKIND), dimension(nVertLevels) :: fzm
       real (kind=RKIND), dimension(nVertLevels) :: fzp
+      real (kind=RKIND), dimension(nVertLevels,nEdges+1) :: ruAvg
+      real (kind=RKIND), dimension(nVertLevels+1,nCells+1) :: wwAvg
       real (kind=RKIND), dimension(nVertLevels+1,2,nEdges+1) :: zb
       real (kind=RKIND), dimension(nVertLevels+1,2,nEdges+1) :: zb3
       real (kind=RKIND), dimension(nVertLevels+1,maxEdges,nCells+1) :: zb_cell
       real (kind=RKIND), dimension(nVertLevels+1,maxEdges,nCells+1) :: zb3_cell
       real (kind=RKIND), dimension(nVertLevels,nCells+1) :: zz
-
       real (kind=RKIND), dimension(nVertLevels+1,nCells+1) :: w_tend
       real (kind=RKIND), dimension(nVertLevels,nEdges+1) :: u_tend
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rho_pp
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rho_p_save
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rho_p
+      real (kind=RKIND), dimension(nVertLevels,nEdges+1) :: ru_p
+      real (kind=RKIND), dimension(nVertLevels,nEdges+1) :: ru
+      real (kind=RKIND), dimension(nVertLevels,nEdges+1) :: ru_save
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rtheta_pp
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rtheta_p_save
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rtheta_p
+      real (kind=RKIND), dimension(nVertLevels,nCells+1) :: rtheta_pp_old
+      real (kind=RKIND), dimension(nVertLevels+1,nCells+1) :: rw_p
+      real (kind=RKIND), dimension(nVertLevels+1,nCells+1) :: rw_save
+      real (kind=RKIND), dimension(nVertLevels+1,nCells+1) :: rw
+      real (kind=RKIND), dimension(maxEdges,nCells+1) :: edgesOnCell_sign
 
-
+      integer, dimension(nCells+1), intent(in) :: bdyMaskCell  !  added for regional_MPAS
       !
       ! Local variables
       !
@@ -2582,7 +2620,9 @@ module atm_time_integration
                            - (zb_cell(k,i,iCell) + sign(1.0_RKIND, u_tend(k,iEdge)) * zb3_cell(k,i,iCell)) * flux
                end do
             end do
-!DIR$ IVDEP
+!SK do we need to add this line back and also add some !$acc loop seq or
+!vector below?
+!!DIR$ IVDEP
 !!!JBK                                                                                            
          if(const_ptop.eq.1)  then
             do k = max(kzp,2),nVertLevels
@@ -3108,7 +3148,9 @@ module atm_time_integration
          end if
 
       end do !  end of loop over cells
-      !$acc end parallel
+
+      
+!$acc end parallel
 
       MPAS_ACC_TIMER_START('atm_advance_acoustic_step [ACC_data_xfer]')
       !$acc exit data delete(exner,cqu,cofwt,coftz,cofrz,cofwr,cofwz, &
@@ -3467,7 +3509,7 @@ module atm_time_integration
       !
 
 !!!JBK - for const_ptop
-      integer                                :: i, iCell, iEdge, k, cell1, cell2,j
+      integer                                :: i, iCell, iEdge, k, cell1, cell2, j, diagnostic
       real (kind=RKIND)                      :: invNs, rcv, p0, flux, dz
       real (kind=RKIND), dimension(nCells+1) :: hztm
       call mpas_pool_get_field(mesh, 'hzt', hzt_field)
@@ -3545,21 +3587,21 @@ module atm_time_integration
                pressure_p(k,iCell) = zz(k,iCell) * rgas * (exner(k,iCell)*rtheta_p(k,iCell)+rtheta_base(k,iCell)  &
                                                           * (exner(k,iCell)-exner_base(k,iCell)))
             end do
-         end do
+!         end do
          !$acc end parallel
       else
          !$acc parallel default(present)
          !$acc loop collapse(2)
-         do iCell=cellStart,cellEnd
+!         do iCell=cellStart,cellEnd
 !DIR$ IVDEP
             do k = 1, nVertLevels
                rtheta_p(k,iCell) = rtheta_p_save(k,iCell) + rtheta_pp(k,iCell)
                theta_m(k,iCell) = (rtheta_p(k,iCell) + rtheta_base(k,iCell))/rho_zz(k,iCell)
             end do
-         end do
+!         end do
          !$acc end parallel
       end if
-
+     end do
       ! recover time-averaged ruAvg on all edges of owned cells (for upcoming scalar transport).
       ! we solved for these in the acoustic-step loop.
       ! we will compute ru and u here also, given we are here, even though we only need them on nEdgesSolve
@@ -3838,7 +3880,10 @@ module atm_time_integration
 !!!JBK
 
 !!!JBK - Diagnostics that can be removed
-      
+
+      diagnostic = 0
+      if(diagnostic.eq.1)  then
+         
             scalar_min = 0.0
             scalar_max = 0.0
             do iCell = 1, nCellsSolve
@@ -3893,7 +3938,8 @@ module atm_time_integration
              realArgs=(/zgrid(k,i),theta_m(k,i)*exner(k,i),.01*pressure_p(k,i),u(k,i),w(k,i)/))
       end do
 
-!!!JBK end of diagnostics
+!!!   JBK end of diagnostics
+      end if
       
       end if  ! End of update for rk_step=3
 
@@ -5436,12 +5482,11 @@ module atm_time_integration
 
       if (rk_step == 1) then
 
-         do iCell=cellStart,cellEnd
-
-!!          Moved reset of tend_theta_euler to here 
-            tend_theta_euler(1:nVertLevels,iCell) = 0.0
-
-         end do
+!!!JBK Reset of tend_theta_euler to zero needs to move to here for diurnal heating test case 
+!         do iCell=cellStart,cellEnd
+!            tend_theta_euler(1:nVertLevels,iCell) = 0.0
+!         end do
+!!!JBK-end
 
 !!!         Call to subroutine diurnal_heating_rate activated for diurnal heating test case
 !!!         global = 0  ! for 2-D diurnal heating on a flat plane
@@ -5728,11 +5773,10 @@ module atm_time_integration
 !         end do
 !         !$acc end parallel
 !SK
-        p0 = 1.0e+05  ! this should come from somewhere else...                                                                                                
+        p0 = 1.0e+05  ! this should come from somewhere else...                                  
 
-!!!JBK - Temporary mod to print reference_sounding
+!!! - Temporary mod to print reference_sounding_switch
         call mpas_log_write('reference_sounding_switch = $i ', intArgs=(/reference_sounding_switch/))
-!!!JBK end
 
 !         tend_u_euler(1:nVertLevels,edgeStart:edgeEnd) = 0.0
 
@@ -5911,7 +5955,8 @@ module atm_time_integration
          ! horizontal pressure gradient 
 
          if(rk_step == 1) then
-!DIR$ IVDEP
+!sk commented this out for now. 
+!!DIR$ IVDEP
 
 !!!JBK - Mods to use log(p)
 !            do k=1,nVertLevels
@@ -6455,7 +6500,8 @@ module atm_time_integration
          end do
 
          if(rk_step == 1) then
-!DIR$ IVDEP
+!SK commented this out but come back to it later
+!!DIR$ IVDEP
 
 !!!JBK - Mods for using log(p)
 
@@ -6599,9 +6645,18 @@ module atm_time_integration
          !$acc parallel default(present)
          !$acc loop gang worker
          do iCell=cellStart,cellEnd
-!!!JBK      Moved reset of tend_theta_euler to subroutine atm_compute_dyn_tend
-!!!         tend_theta_euler(1:nVertLevels,iCell) = 0.0
+            
+!!!Begin moved from V8.3.1
+            !$acc loop vector   
+            do k=1,nVertLevels
+               delsq_theta(k,iCell) = 0.0_RKIND
+
+!!!   JBK Reset of tend_theta_euler to zero needs to move to subroutine atm_compute_dyn_tend for diurnal heating test case.
+               tend_theta_euler(k,iCell) = 0.0_RKIND
 !!!JBK
+            end do
+!!!!End moved from V8.3.1
+
             r_areaCell = invAreaCell(iCell)
 
             !$acc loop seq
@@ -6766,7 +6821,7 @@ module atm_time_integration
          end do
       end do
       !$acc end parallel
-
+      
       MPAS_ACC_TIMER_START('atm_compute_dyn_tend_work [ACC_data_xfer]')
       if (rk_step == 1) then
          !$acc exit data copyout(tend_w_euler)
@@ -6818,6 +6873,9 @@ module atm_time_integration
       type (mpas_pool_type), intent(in) :: diag
       type (mpas_pool_type), intent(in) :: mesh
 
+!! WCS PTF: moved this up (before nVertLevels is used)
+      integer, intent(in) :: nCells, cellStart, cellEnd, nVertlevels
+
       real (kind=RKIND), dimension(nVertLevels,nCells+1) :: tend_theta_euler
       real (kind=RKIND), dimension(:,:), pointer :: zgrid
       real (kind=RKIND), dimension(:,:), pointer :: rr_save
@@ -6825,7 +6883,7 @@ module atm_time_integration
       real (kind=RKIND), dimension(:)  , pointer :: xCell, latCell, lonCell
       real (kind=RKIND),                 pointer :: ttopb, dttop, tbot, zbot, zsc, omega_dh,time_sec
 
-      integer, intent(in) :: nCells, cellStart, cellEnd, nVertlevels
+!      integer, intent(in) :: nCells, cellStart, cellEnd, nVertlevels
       integer             :: iCell, k, global
       real (kind=RKIND)   :: xc, xtemp, rate, ttop, tanhz, ztemp, dt
 
@@ -8650,9 +8708,10 @@ module atm_time_integration
 !!!JBK
          call mpas_pool_get_array(mesh, 'hzt', hzt)
 !!!
-         call mpas_pool_get_dimension(state, 'nCellsSolve', nCellsSolve)
-         call mpas_pool_get_dimension(state, 'nEdgesSolve', nEdgesSolve)
-         call mpas_pool_get_dimension(state, 'nVertLevels', nVertLevels)
+!SK commented the following 3 lines
+!         call mpas_pool_get_dimension(state, 'nCellsSolve', nCellsSolve)
+!         call mpas_pool_get_dimension(state, 'nEdgesSolve', nEdgesSolve)
+!         call mpas_pool_get_dimension(state, 'nVertLevels', nVertLevels)
 
          scalar_min = 1.0e20
          offset_1d = huge(1)

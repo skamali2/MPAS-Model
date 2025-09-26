@@ -38,7 +38,9 @@ module mpas_atm_diagnostics_manager
         use mpas_convective_diagnostics, only : convective_diagnostics_setup
         use mpas_pv_diagnostics, only : pv_diagnostics_setup
         use mpas_soundings, only : soundings_setup
-        use mpas_basic_state_diagnostics, only : basic_state_diagnostics_setup
+!sk commented this out as it doesn't seem to exist in the new version of
+!the code. 
+!        use mpas_basic_state_diagnostics, only : basic_state_diagnostics_setup
 
         implicit none
 
@@ -60,7 +62,7 @@ module mpas_atm_diagnostics_manager
         call convective_diagnostics_setup(structs, clock)
         call pv_diagnostics_setup(structs, clock)
         call soundings_setup(configs, structs, clock, dminfo)
-        call basic_state_diagnostics_setup(structs, clock)
+!SK commented this out        call basic_state_diagnostics_setup(structs, clock)
 
     end subroutine mpas_atm_diag_setup
 
@@ -107,7 +109,9 @@ module mpas_atm_diagnostics_manager
         use mpas_convective_diagnostics, only : convective_diagnostics_compute
         use mpas_pv_diagnostics, only : pv_diagnostics_compute
         use mpas_soundings, only : soundings_compute
-        use mpas_basic_state_diagnostics, only : basic_state_diagnostics_compute
+!SK is commenting this out since it seems that the new version of the
+!code is not using this
+!        use mpas_basic_state_diagnostics, only : basic_state_diagnostics_compute
 
         implicit none
 
@@ -118,7 +122,7 @@ module mpas_atm_diagnostics_manager
         call convective_diagnostics_compute()
         call pv_diagnostics_compute()
         call soundings_compute()
-        call basic_state_diagnostics_compute()
+!sk commented this out        call basic_state_diagnostics_compute()
 
     end subroutine mpas_atm_diag_compute
 
